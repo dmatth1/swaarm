@@ -136,21 +136,23 @@ run_worker() {
     fi
 
     local worker_name="worker-$agent_id"
-    local log_file="/logs/${worker_name}.log"
+    local log_file="${LOGS_DIR:-/logs}/${worker_name}.log"
 
     echo "=== Worker $agent_id started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone /upstream /workspace -q 2>/dev/null
-    cd /workspace
+    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "${worker_name}@swarm"
     git config user.name "Swarm Worker $agent_id"
 
     # Prepare prompt
     local prompt
-    prompt=$(sed "s|{{AGENT_ID}}|${worker_name}|g" /prompts/worker.md)
+    prompt=$(sed "s|{{AGENT_ID}}|${worker_name}|g" "${PROMPTS_DIR:-/prompts}/worker.md")
 
     local iteration=0
+    local rate_limit_attempts=0
+    local -a backoff_delays=(300 900 1800 3600 7200 14400)
 
     while true; do
         # Pull latest state
@@ -199,6 +201,21 @@ run_worker() {
             output=$(echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1) || true
             echo "$output" >> "$log_file"
         fi
+
+        # Check for rate-limit — keep task claimed, sleep, retry
+        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429"; then
+            local delay_idx=$(( rate_limit_attempts < ${#backoff_delays[@]} ? rate_limit_attempts : ${#backoff_delays[@]} - 1 ))
+            local base_delay="${backoff_delays[$delay_idx]}"
+            local jitter=$(( (RANDOM % 41) + 80 ))
+            local sleep_secs=$(( base_delay * jitter / 100 ))
+            rate_limit_attempts=$(( rate_limit_attempts + 1 ))
+            echo "[rate-limit] attempt ${rate_limit_attempts}, sleeping ${sleep_secs}s (base=${base_delay}s, jitter=${jitter}%)" >> "$log_file"
+            sleep "$sleep_secs"
+            continue
+        fi
+
+        # Successful call — reset rate-limit backoff counter
+        rate_limit_attempts=0
 
         # Check completion signals
         if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|WORKER.*DONE"; then
