@@ -545,6 +545,27 @@ docker_run_worker() {
     echo "$container_name" > "$OUTPUT_DIR/pids/worker-${agent_id}.cid"
 }
 
+docker_run_reviewer() {
+    local task_name="$1"
+    local review_num="$2"
+    local container_name="swarm-${RUN_ID}-reviewer-${review_num}"
+
+    local oauth_token
+    oauth_token=$(get_claude_oauth_token) || true
+
+    docker run --rm \
+        --name "$container_name" \
+        -v "$REPO_DIR:/upstream" \
+        -v "$LOGS_DIR:/logs" \
+        -v "$PROMPTS_DIR:/prompts:ro" \
+        ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
+        -e COMPLETED_TASK="$task_name" \
+        -e REVIEW_NUM="$review_num" \
+        -e VERBOSE="$VERBOSE" \
+        "$DOCKER_IMAGE" \
+        reviewer || true
+}
+
 docker_wait_workers() {
     local agents="$1"
     local failed=0
