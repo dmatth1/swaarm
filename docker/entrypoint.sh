@@ -34,9 +34,12 @@ run_orchestrator() {
     git config user.email "orchestrator@swarm"
     git config user.name "Swarm Orchestrator"
 
-    # Prepare prompt
+    # Prepare prompt (awk handles multiline TASK safely; sed breaks on newlines)
     local prompt
-    prompt=$(sed "s|{{TASK}}|$task|g" /prompts/orchestrator.md)
+    prompt=$(awk -v task="$task" '{
+        if ($0 ~ /\{\{TASK\}\}/) { gsub(/\{\{TASK\}\}/, ""); print task }
+        else { print }
+    }' /prompts/orchestrator.md)
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
@@ -149,9 +152,7 @@ run_worker() {
 
     local iteration=0
 
-    while [[ $iteration -lt $max_iterations ]]; do
-        iteration=$((iteration + 1))
-
+    while true; do
         # Pull latest state
         git pull origin main -q 2>/dev/null || true
 
@@ -161,7 +162,7 @@ run_worker() {
         own_active=$(find tasks/active/ -maxdepth 1 -name "${worker_name}--*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         all_active=$(find tasks/active -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
-        # If no work for this agent
+        # If no work for this agent — waits don't count against the iteration limit
         if [[ "$pending" -eq 0 && "$own_active" -eq 0 ]]; then
             if [[ "$all_active" -eq 0 ]]; then
                 if [[ "${MULTI_ROUND:-false}" == "true" ]]; then
@@ -177,6 +178,14 @@ run_worker() {
                 sleep 5
                 continue
             fi
+        fi
+
+        # Only count iterations where we actually invoke Claude
+        iteration=$((iteration + 1))
+        if [[ $iteration -gt $max_iterations ]]; then
+            echo "Worker $agent_id: reached max iterations ($max_iterations)" >> "$log_file"
+            echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
+            exit 0
         fi
 
         echo -e "\n--- Worker $agent_id Iteration $iteration ($(date)) ---" >> "$log_file"
@@ -205,9 +214,6 @@ run_worker() {
 
         sleep 2
     done
-
-    echo "Worker $agent_id: reached max iterations ($max_iterations)" >> "$log_file"
-    echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
 }
 
 # ─────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ MAX_WORKER_ITERATIONS=100
 USE_DOCKER=true
 DOCKER_IMAGE="swarm-agent"
 RUN_ID=""
+EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
 
 usage() {
     cat <<'EOF'
@@ -42,11 +43,13 @@ Arguments:
   task              Natural language description of what to build or do
 
 Options:
-  -n, --agents N    Number of parallel worker agents (default: 3)
-  -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
-  -v, --verbose     Show agent output in real-time
-  --no-docker       Run agents on host instead of in Docker containers
-  -h, --help        Show this help
+  -n, --agents N        Number of parallel worker agents (default: 3)
+  -o, --output DIR      Output directory (default: ./swarm-TIMESTAMP)
+  -v, --verbose         Show agent output in real-time
+  --no-docker           Run agents on host instead of in Docker containers
+  --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
+  --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
+  -h, --help            Show this help
 
 Subcommands:
   swarm status <output-dir>           Show live status of a running swarm
@@ -470,10 +473,12 @@ esac
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -n|--agents)    NUM_AGENTS="$2"; shift 2 ;;
-        -o|--output)    OUTPUT_DIR="$2"; shift 2 ;;
-        -v|--verbose)   VERBOSE=true; shift ;;
-        --no-docker)    USE_DOCKER=false; shift ;;
+        -n|--agents)        NUM_AGENTS="$2"; shift 2 ;;
+        -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
+        -v|--verbose)       VERBOSE=true; shift ;;
+        --no-docker)        USE_DOCKER=false; shift ;;
+        --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
+        --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         -h|--help)      usage; exit 0 ;;
         -*)             error "Unknown option: $1"; usage; exit 1 ;;
         *)              TASK="${TASK:+$TASK }$1"; shift ;;
@@ -526,11 +531,15 @@ docker_run_orchestrator() {
     local oauth_token
     oauth_token=$(get_claude_oauth_token) || true
 
+    local extra_vol_flags=()
+    for _m in "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}"; do extra_vol_flags+=(-v "$_m"); done
+
     docker run --rm \
         --name "$container_name" \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
+        "${extra_vol_flags[@]+"${extra_vol_flags[@]}"}" \
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e TASK="$TASK" \
         -e VERBOSE="$VERBOSE" \
@@ -574,6 +583,7 @@ docker_run_worker() {
 
     local extra_flags=()
     [[ "$auto_rm" == "true" ]] && extra_flags+=("--rm")
+    for _m in "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}"; do extra_flags+=(-v "$_m"); done
 
     docker run -d \
         "${extra_flags[@]+"${extra_flags[@]}"}" \
@@ -602,11 +612,15 @@ docker_run_reviewer() {
     local oauth_token
     oauth_token=$(get_claude_oauth_token) || true
 
+    local extra_vol_flags=()
+    for _m in "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}"; do extra_vol_flags+=(-v "$_m"); done
+
     docker run --rm \
         --name "$container_name" \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
+        "${extra_vol_flags[@]+"${extra_vol_flags[@]}"}" \
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e COMPLETED_TASK="$task_name" \
         -e REVIEW_NUM="$review_num" \
@@ -624,11 +638,15 @@ docker_run_specialist() {
     local oauth_token
     oauth_token=$(get_claude_oauth_token) || true
 
+    local extra_vol_flags=()
+    for _m in "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}"; do extra_vol_flags+=(-v "$_m"); done
+
     docker run --rm \
         --name "$container_name" \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
+        "${extra_vol_flags[@]+"${extra_vol_flags[@]}"}" \
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e SPECIALIST_NAME="$specialist_name" \
         -e SPECIALIST_ROLE="$specialist_role" \
@@ -776,6 +794,8 @@ run_with_review() {
     local max_stuck_cycles=3
     local last_specialist_sweep=0
     local specialist_interval="${SPECIALIST_INTERVAL:-5}"
+    local specialist_early="${SPECIALIST_EARLY_SWEEP:-3}"
+    local specialist_first_swept=false
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -858,13 +878,20 @@ run_with_review() {
             done
         fi
 
-        # Run specialist sweep if enough tasks have completed since last sweep
+        # Run specialist sweep: early threshold for first sweep, then fixed interval
         if [[ "$all_complete" == "false" ]]; then
-            local current_done
+            local current_done should_sweep=false
             current_done=$(done_count)
-            if [[ "$current_done" -gt 0 && "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
-                run_specialist_sweep "after ${current_done} tasks"
+            if [[ "$specialist_first_swept" == "false" && "$current_done" -ge "$specialist_early" ]]; then
+                should_sweep=true
+                specialist_first_swept=true
                 last_specialist_sweep="$current_done"
+            elif [[ "$specialist_first_swept" == "true" && "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
+                should_sweep=true
+                last_specialist_sweep="$current_done"
+            fi
+            if [[ "$should_sweep" == "true" ]]; then
+                run_specialist_sweep "after ${current_done} tasks"
             fi
         fi
 
@@ -1116,9 +1143,7 @@ run_worker() {
 
     local iteration=0
 
-    while [[ $iteration -lt $MAX_WORKER_ITERATIONS ]]; do
-        iteration=$((iteration + 1))
-
+    while true; do
         # Pull latest state
         (cd "$worker_dir" && git pull origin main -q 2>/dev/null) || true
 
@@ -1128,7 +1153,7 @@ run_worker() {
         own_active=$(find "$worker_dir/tasks/active/" -maxdepth 1 -name "worker-$agent_id--*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
         all_active=$(count_files "$worker_dir/tasks/active")
 
-        # If no work for this agent
+        # If no work for this agent — waits don't count against the iteration limit
         if [[ "$pending" -eq 0 && "$own_active" -eq 0 ]]; then
             if [[ "$all_active" -eq 0 ]]; then
                 success "Worker $agent_id: all tasks complete"
@@ -1140,6 +1165,14 @@ run_worker() {
                 sleep 5
                 continue
             fi
+        fi
+
+        # Only count iterations where we actually invoke Claude
+        iteration=$((iteration + 1))
+        if [[ $iteration -gt $MAX_WORKER_ITERATIONS ]]; then
+            warn "Worker $agent_id: reached max iterations ($MAX_WORKER_ITERATIONS)"
+            echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
+            return 0
         fi
 
         if [[ "$VERBOSE" == "true" ]]; then log "Worker $agent_id: iteration $iteration (pending=$pending, own_active=$own_active)"; fi
@@ -1165,10 +1198,6 @@ run_worker() {
 
         sleep 2
     done
-
-    warn "Worker $agent_id: reached max iterations ($MAX_WORKER_ITERATIONS)"
-    echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
-    return 0
 }
 
 # ─────────────────────────────────────────────────────────────
