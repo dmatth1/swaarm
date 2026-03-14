@@ -589,6 +589,103 @@ docker_wait_workers() {
     echo "$failed"
 }
 
+run_with_review() {
+    local agents="$1"
+
+    # Spawn all workers in background (MULTI_ROUND=true set in docker_run_worker)
+    log "Spawning $agents worker agents..."
+    for i in $(seq 1 "$agents"); do
+        docker_run_worker "$i"
+        sleep 1
+    done
+    echo
+
+    monitor_progress &
+    local monitor_pid=$!
+
+    local reviewed=()
+    local review_count=0
+    local max_reviews=$(( MAX_WORKER_ITERATIONS * agents ))
+    local all_complete=false
+
+    while [[ "$all_complete" == "false" ]]; do
+        sleep 5
+        sync_main
+
+        local new_reviews_this_cycle=0
+
+        # Scan done/ for unreviewed tasks
+        local task_file task_name
+        for task_file in "$MAIN_DIR/tasks/done/"*.md; do
+            [[ -f "$task_file" ]] || continue
+            task_name=$(basename "$task_file")
+            [[ "$task_name" == ".gitkeep" ]] && continue
+
+            # Skip already-reviewed tasks
+            local already_reviewed=false
+            local r
+            for r in "${reviewed[@]+"${reviewed[@]}"}"; do
+                if [[ "$r" == "$task_name" ]]; then
+                    already_reviewed=true
+                    break
+                fi
+            done
+            [[ "$already_reviewed" == "true" ]] && continue
+
+            review_count=$((review_count + 1))
+            new_reviews_this_cycle=$((new_reviews_this_cycle + 1))
+
+            if [[ "$review_count" -gt "$max_reviews" ]]; then
+                warn "Max reviews ($max_reviews) reached — forcing stop"
+                all_complete=true
+                break
+            fi
+
+            log "Running reviewer ${review_count} for: $task_name"
+            docker_run_reviewer "$task_name" "$review_count"
+            reviewed+=("$task_name")
+
+            if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                log "Reviewer signaled ALL_COMPLETE"
+                all_complete=true
+                break
+            fi
+        done
+
+        # Final-drain check: no new tasks this cycle AND queue fully idle
+        if [[ "$all_complete" == "false" && "$new_reviews_this_cycle" -eq 0 ]]; then
+            local p_count a_count
+            p_count=$(pending_count)
+            a_count=$(active_count)
+            if [[ "$p_count" -eq 0 && "$a_count" -eq 0 ]]; then
+                review_count=$((review_count + 1))
+                if [[ "$review_count" -gt "$max_reviews" ]]; then
+                    warn "Max reviews ($max_reviews) reached — forcing stop"
+                    all_complete=true
+                else
+                    log "Running final drain reviewer (${review_count})..."
+                    docker_run_reviewer "--final--" "$review_count"
+                    if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                        log "Reviewer signaled ALL_COMPLETE"
+                        all_complete=true
+                    fi
+                fi
+            fi
+        fi
+
+        if [[ "$all_complete" == "false" ]]; then
+            local p a d
+            p=$(pending_count)
+            a=$(active_count)
+            d=$(done_count)
+            log "Review loop: ${d} done | ${a} active | ${p} pending | ${#reviewed[@]} reviewed"
+        fi
+    done
+
+    kill "$monitor_pid" 2>/dev/null || true
+    cleanup_docker
+}
+
 cleanup_docker() {
     if [[ "$USE_DOCKER" == "true" && -n "$RUN_ID" ]]; then
         docker ps -q --filter "name=swarm-${RUN_ID}-" 2>/dev/null | xargs -r docker stop 2>/dev/null || true
