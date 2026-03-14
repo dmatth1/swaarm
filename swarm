@@ -331,12 +331,6 @@ cmd_resume() {
     success "$pending task(s) pending, $done_n done — spawning $agents worker(s)"
     echo
 
-    # Pre-flight specialist sweep before re-spawning workers
-    _g_specialist_count=0
-    run_specialist_sweep "pre-flight-resume"
-    sync_main
-    echo
-
     # Spawn workers
     RUN_ID="$(basename "$OUTPUT_DIR")"
     ensure_docker_image
