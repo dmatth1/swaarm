@@ -13,11 +13,17 @@ The current system works well for small-to-medium projects but breaks down at sc
 2. **Workers read too much context** — the "read SPEC.md first" instruction causes workers to consume the entire project spec on every invocation, wasting context window as the project grows.
 3. **Integration failures surface late** — a single final verification task tries to fix everything at once instead of catching mismatches at natural seams.
 
+## Out of Scope
+
+Interface correction when a worker deviates from a specified contract is handled by multi-round orchestration (future work). This spec assumes workers implement to contract.
+
 ## Design
 
 ### SPEC.md: New `## Interfaces` Section
 
-The orchestrator adds a mandatory `## Interfaces` section to SPEC.md. This is the contract hub — every module's public API defined as named, standalone subsections:
+The orchestrator adds a mandatory `## Interfaces` section to SPEC.md. This is the contract hub — every module's public API defined as named, standalone subsections.
+
+SPEC.md structure: all non-interface content (Goal, Architecture, Technology Stack, File Structure, Success Criteria, Key Decisions) comes first. The `## Interfaces` section is always **last**, enabling workers to stop reading before it:
 
 ```markdown
 ## Interfaces
@@ -42,56 +48,106 @@ Task files gain two new mandatory sections:
 
 ```markdown
 ## Produces
-The named interface this task implements, as defined in SPEC.md § Interfaces:
-- Implements: `UserAPI`
+Implements: `UserAPI`
 
 ## Consumes
-Named interfaces this task depends on, from SPEC.md § Interfaces:
-- `DatabaseSession`
-- `AuthTokenAPI`
+DatabaseSession
+AuthTokenAPI
 ```
 
-`## Produces` names the interface contract this task fulfills.
-`## Consumes` lists the specific interface names workers must read from SPEC.md § Interfaces before starting.
+When a task produces or consumes nothing, write the bare word `None` on the line after the header — no backticks, no bullet:
+
+```markdown
+## Produces
+None
+
+## Consumes
+None
+```
+
+`## Produces` names the interface this task fulfills, or `None`.
+`## Consumes` lists specific interface names (one per line), or `None`.
+
+Workers enumerate all entries in `## Consumes` using:
+```bash
+awk '/^## Consumes/{found=1; next} found && /^## /{exit} found && NF{print}' taskfile.md
+# prints each non-blank line between "## Consumes" and the next "##" heading
+# outputs nothing when the section body is "None" — treat empty output as None
+```
+
+**Integration tasks always write `## Produces` and `## Consumes` as `None`** — they validate components against real code, not interface contracts, and they do not define new contracts.
+
+The existing "tasks should be self-contained — a worker needs only SPEC.md and the task file" rule in `orchestrator.md` is **replaced** by: "a task is the right size when a worker can complete it by reading SPEC.md (non-Interfaces sections) plus the task file plus only its listed interface definitions."
 
 ### Task Count and Granularity
 
-No lower or upper bound on task count — the orchestrator decides based on project complexity. The rule: **a task is the right size when a worker can complete it by reading only its task file and its listed interface definitions.** If completing a task requires understanding the whole codebase, split it.
+No bounds on task count — the orchestrator decides based on project complexity. The sizing rule above is the only constraint.
 
 ### Integration Tasks
 
-The orchestrator inserts integration tasks at natural seams — whenever a group of completed tasks forms a testable subsystem. The signal: *can we run something end-to-end at this point?*
+The orchestrator inserts an integration task **when designing a downstream task whose `## Consumes` would list 3 or more entries**. Instead of that downstream task consuming 3+ interfaces directly, insert an integration task that validates those components first, then have the downstream task depend on the integration task with a smaller `## Consumes`. Only non-integration tasks count toward the threshold.
 
-Integration tasks are regular tasks with explicit dependencies on everything they validate. The existing git lock mechanism enforces this: an integration task won't be claimable until all its dependencies are in `tasks/done/`.
+Integration tasks:
+- `## Produces: None`
+- `## Consumes: None` (they read actual code, not interface contracts)
+- `## Dependencies`: all component tasks they validate
+- Body: smoke tests that verify the components wire together and produce expected outputs against their SPEC.md interface definitions
 
-Example placement: after all database/model tasks complete and before API tasks start, insert `050-integration-data-layer.md` that wires and smoke-tests the foundation.
+Downstream tasks must list the integration task as their dependency — not the individual component tasks.
+
+Example placement for a full-stack app:
+- After `001`–`004` (DB models, migrations, connection pool) → `005-integration-data-layer.md` (smoke tests DB round-trip)
+- After `006`–`012` (API routes, auth, middleware) → `013-integration-api-layer.md` (smoke tests API endpoints)
+- Final: `NNN-integration-full-stack.md` after all layers are integrated
 
 ### Worker Protocol Changes
 
 **Before (current):**
 1. `git pull`
 2. Read `SPEC.md` (entire document)
-3. Check pending tasks
+3. Check pending tasks, read task files to check dependencies
 4. Claim and execute
 
 **After:**
 1. `git pull`
-2. Read task file
-3. Read only the interface definitions listed in `## Consumes` from SPEC.md § Interfaces
-4. Confirm dependencies are in `tasks/done/`
-5. Claim and execute
-
-Workers read the specific interfaces they need — not the full spec. As the project grows, a worker building auth reads `UserAPI` and `DatabaseSession`, not the 20 other interfaces defined for the rest of the system.
+2. Read SPEC.md architecture context — everything up to but not including `## Interfaces` — using:
+   ```bash
+   awk '/^## Interfaces/{exit} {print}' SPEC.md
+   ```
+3. Scan pending tasks; read each task file briefly to check `## Dependencies`. Skip tasks whose dependencies aren't in `tasks/done/`.
+4. Pick lowest-numbered available candidate.
+5. **Claim** (push to active; if push fails, return to step 3).
+6. After successful claim: read `## Consumes` from the claimed task file.
+   - If `None`: skip this step entirely.
+   - Otherwise, for each named interface listed, extract that subsection from SPEC.md using:
+     ```bash
+     awk '/^### InterfaceName$/{found=1; next} found && /^### /{exit} found{print}' SPEC.md
+     ```
+     (Replace `InterfaceName` with the actual interface name. Run once per listed interface.)
+7. Execute.
 
 ## Files to Change
 
-- `prompts/orchestrator.md` — add Interfaces section requirement, update task file format, add integration task guidance, remove task count bounds
-- `prompts/worker.md` — replace "read SPEC.md" with targeted interface reading, update protocol steps
+- `prompts/orchestrator.md`:
+  - Add `## Interfaces` section requirement (always last in SPEC.md)
+  - Update task file format with `## Produces`/`## Consumes` including `None` conventions
+  - Specify integration tasks always have `## Produces: None` and `## Consumes: None`
+  - Replace "Tasks should be self-contained" rule with updated sizing rule
+  - Add integration task insertion rule (3+ non-integration tasks sharing a downstream consumer)
+  - Remove task count bounds
+- `prompts/worker.md`:
+  - Replace "Read SPEC.md" with the `awk` command for partial read
+  - Add post-claim targeted interface extraction with `awk` command
+  - Add `None` branch: skip interface read if `## Consumes` is `None`
+  - Update protocol steps
 
 ## Success Criteria
 
-- [ ] Orchestrator reliably produces a SPEC.md with a well-structured `## Interfaces` section
-- [ ] All task files include `## Produces` and `## Consumes` sections with named interface references
-- [ ] Integration tasks appear at natural seams in the task graph, not just at the end
-- [ ] Workers read only their required interface definitions, not the full SPEC.md
+- [ ] Orchestrator produces a SPEC.md with `## Interfaces` as the last section on every run
+- [ ] All task files include `## Produces` and `## Consumes` (or explicit `None`)
+- [ ] Integration tasks always have `## Produces: None` and `## Consumes: None`
+- [ ] Integration tasks appear after every group of 3+ non-integration tasks sharing a downstream consumer
+- [ ] Workers use the `awk` command to read SPEC.md architecture sections without loading the Interfaces section
+- [ ] Workers skip interface extraction when `## Consumes` is `None`
+- [ ] Workers use targeted `awk` extraction to read only their listed interface definitions post-claim
 - [ ] A full-stack app (auth + DB + API + frontend, 15+ components) completes with components that integrate correctly on first attempt
