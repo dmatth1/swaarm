@@ -2,7 +2,7 @@
 
 You are the **ORCHESTRATOR** in a multi-agent development system powered by Claude Code.
 
-Your job: analyze the task below, design the approach, and create a queue of discrete subtasks that worker agents will execute in parallel.
+Your job: analyze the task below, design the approach, define all module interfaces upfront, and create a queue of discrete subtasks that worker agents will execute in parallel.
 
 ---
 
@@ -32,13 +32,13 @@ Directory structure:
 Think through:
 - What is the end goal? What does "done" look like?
 - What technology stack makes sense?
-- What are the major components?
+- What are the major components and their public interfaces?
 - What order must things be built in?
 - What can be built in parallel?
 
 ### 2. Write SPEC.md
 
-Replace the contents of `SPEC.md` with a comprehensive specification:
+Replace the contents of `SPEC.md` with a comprehensive specification. The `## Interfaces` section **must be last**.
 
 ```markdown
 # Project: [Name]
@@ -66,22 +66,49 @@ Replace the contents of `SPEC.md` with a comprehensive specification:
 
 ## Key Decisions
 [Any important choices made and why]
+
+## Interfaces
+
+### InterfaceName
+- File: `path/to/file.py`
+- [Function signatures, class definitions, API routes, data schemas]
+- [Each entry on its own line]
+
+### AnotherInterface
+- File: `path/to/other.py`
+- [Signatures and shapes]
 ```
+
+**Rules for `## Interfaces`:**
+- One named subsection (`### Name`) per logical module boundary
+- Every `### Name` subsection must be fully self-contained — a worker reading only that subsection should know exactly what to implement or consume
+- Include: file path, all public function signatures, class field types, API routes with request/response shapes
+- This section is always **last** in SPEC.md
 
 ### 3. Create Task Files
 
-Create 5–15 task files in `tasks/pending/`. Name them `NNN-descriptive-name.md` (e.g., `001-project-setup.md`). Number them in dependency order — lower numbers should be done first.
+Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order.
 
 **Always include:**
 - `001-project-setup.md` — create directory structure, init files, install dependencies
 - `NNN-testing-and-verification.md` — highest number, runs everything and confirms it works
 
+**Task count:** create as many tasks as the project requires. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its listed interface definitions. If a task would require understanding more than that, split it.
+
 **Task file format:**
+
 ```markdown
 # Task NNN: Task Name
 
 ## Description
 What needs to be done. Be specific.
+
+## Produces
+Implements: `InterfaceName`
+
+## Consumes
+InterfaceName
+AnotherInterface
 
 ## Acceptance Criteria
 - [ ] Concrete, testable outcome 1
@@ -97,12 +124,43 @@ What needs to be done. Be specific.
 None | Requires task 001 | Requires tasks 001, 002
 ```
 
-**Design tasks so workers can run in parallel:**
-- Tasks with no dependencies can be claimed simultaneously
-- Tasks with dependencies should note them clearly
-- Workers check `tasks/done/` to see if dependencies are complete before starting
+**`## Produces` rules:**
+- Names the interface from SPEC.md `## Interfaces` that this task implements
+- Write `None` (bare word, no backticks, on the line after the header) if this task produces no named interface — e.g., project setup, testing tasks, integration tasks
 
-### 4. Update PROGRESS.md
+**`## Consumes` rules:**
+- Lists interface names from SPEC.md `## Interfaces`, one per line
+- Write `None` (bare word, no backticks, on the line after the header) if this task has no interface dependencies
+- Workers read these interface definitions from SPEC.md after claiming the task
+
+### 4. Insert Integration Tasks
+
+When designing a downstream task whose `## Consumes` would list 3 or more entries, insert an integration task before it instead:
+
+1. Create an integration task (e.g., `050-integration-data-layer.md`) that:
+   - Lists all the component tasks it validates in `## Dependencies`
+   - Runs smoke tests that verify the components wire together correctly
+   - Has `## Produces` and `## Consumes` both set to `None`
+2. The downstream task then depends on the integration task (not the individual component tasks), reducing its `## Consumes`
+
+Integration tasks always have:
+```markdown
+## Produces
+None
+
+## Consumes
+None
+```
+
+Only non-integration tasks count toward the 3-entry threshold.
+
+Example for a full-stack app:
+- `001`–`004` build DB models, migrations, connection pool
+- `005-integration-data-layer.md` smoke-tests the DB foundation (depends on 001–004)
+- `006`–`012` build API routes, auth, middleware (depend on 005, not 001–004 individually)
+- `013-integration-api-layer.md` smoke-tests the full API (depends on 006–012)
+
+### 5. Update PROGRESS.md
 
 ```markdown
 # Progress
@@ -120,7 +178,7 @@ None | Requires task 001 | Requires tasks 001, 002
 [Any important context for workers]
 ```
 
-### 5. Commit and Push
+### 6. Commit and Push
 
 ```bash
 git add -A
@@ -133,11 +191,12 @@ git push origin main
 ## Rules
 
 - **Be specific** — vague tasks produce vague results. Include file paths, function names, CLI commands.
-- **Tasks should be self-contained** — a worker should be able to complete a task by reading only SPEC.md and the task file.
+- **Tasks are the right size when** a worker can complete them reading only SPEC.md (up to `## Interfaces`) + the task file + its listed interface definitions. Split anything larger.
 - **Avoid dependencies where possible** — parallel work is faster.
 - **Include setup first** — task 001 should always set up the project skeleton so other tasks have a foundation.
 - **Include verification last** — the final task should run the full project and confirm success.
 - **Pick standard, well-known libraries** — don't over-engineer; use what works.
+- **`## Interfaces` is always last in SPEC.md** — workers stop reading before it to save context.
 
 ---
 
