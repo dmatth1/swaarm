@@ -277,7 +277,7 @@ cmd_resume() {
     fi
 
     # shellcheck source=/dev/null
-    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS, SWARM_DOCKER
+    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS, SWARM_DOCKER, SWARM_MULTI_ROUND
 
     local agents="${override_agents:-$SWARM_AGENTS}"
     USE_DOCKER="${SWARM_DOCKER:-true}"
@@ -333,7 +333,7 @@ cmd_resume() {
     pending=$(find "$MAIN_DIR/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     done_n=$(find "$MAIN_DIR/tasks/done" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
-    if [[ "$pending" -eq 0 ]]; then
+    if [[ "$pending" -eq 0 && "${SWARM_MULTI_ROUND:-false}" != "true" ]]; then
         success "Nothing to resume — all tasks already complete ($done_n done)"
         info "Project files: $MAIN_DIR/"
         exit 0
@@ -347,14 +347,19 @@ cmd_resume() {
     if [[ "$USE_DOCKER" == "true" ]]; then
         RUN_ID="$(basename "$OUTPUT_DIR")"
         ensure_docker_image
-        for i in $(seq 1 "$agents"); do
-            docker_run_worker "$i"
-            sleep 1
-        done
-        monitor_progress &
-        local monitor_pid=$!
-        failed=$(docker_wait_workers "$agents")
-        kill "$monitor_pid" 2>/dev/null || true
+        trap cleanup_docker EXIT
+        if [[ "${SWARM_MULTI_ROUND:-false}" == "true" ]]; then
+            run_with_review "$agents"
+        else
+            for i in $(seq 1 "$agents"); do
+                docker_run_worker "$i"
+                sleep 1
+            done
+            monitor_progress &
+            local monitor_pid=$!
+            failed=$(docker_wait_workers "$agents")
+            kill "$monitor_pid" 2>/dev/null || true
+        fi
     else
         # Remove old worker dirs so run_worker clones fresh
         for i in $(seq 1 "$agents"); do
@@ -993,10 +998,13 @@ main() {
     echo
 
     # Write state file so 'swarm resume' can restart this run
+    local swarm_multi_round="false"
+    if [[ "$USE_DOCKER" == "true" ]]; then swarm_multi_round="true"; fi
     {
         printf 'SWARM_TASK=%q\n' "$TASK"
         printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
         printf 'SWARM_DOCKER=%s\n' "$USE_DOCKER"
+        printf 'SWARM_MULTI_ROUND=%s\n' "$swarm_multi_round"
         printf 'SWARM_STARTED="%s"\n' "$(date)"
     } > "$OUTPUT_DIR/swarm.state"
 
