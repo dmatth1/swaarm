@@ -53,6 +53,7 @@ Subcommands:
   swarm kill <output-dir> [agent-id]  Kill all agents or a specific one
                                        agent-id: worker-1, worker-2, ..., orchestrator
   swarm resume <output-dir> [-n N]    Resume after interruption (rate limit, crash, kill)
+  swarm cleanup [output-dir]          Remove orphaned containers (all runs, or specific run)
 
 Examples:
   swarm "Build a REST API for a todo app with SQLite"
@@ -256,6 +257,34 @@ cmd_kill() {
     fi
 }
 
+cmd_cleanup() {
+    local output_dir="${1:-}"
+    if ! command -v docker &>/dev/null; then
+        error "Docker not found"
+        exit 1
+    fi
+
+    local filter containers
+    if [[ -n "$output_dir" ]]; then
+        local run_id
+        run_id=$(basename "$output_dir")
+        filter="name=swarm-${run_id}-"
+        log "Cleaning up containers for run: $run_id"
+    else
+        filter="name=swarm-"
+        log "Cleaning up all swarm containers..."
+    fi
+
+    containers=$(docker ps -aq --filter "$filter" 2>/dev/null)
+    if [[ -n "$containers" ]]; then
+        echo "$containers" | xargs docker stop 2>/dev/null || true
+        echo "$containers" | xargs docker rm 2>/dev/null || true
+        success "Done"
+    else
+        log "No swarm containers found"
+    fi
+}
+
 cmd_resume() {
     local output_dir="${1:-}"
     local override_agents="${2:-}"
@@ -430,6 +459,11 @@ case "${1:-}" in
         cmd_resume "$output_dir" "$override_agents"
         exit 0
         ;;
+    cleanup)
+        shift
+        cmd_cleanup "${1:-}"
+        exit 0
+        ;;
 esac
 
 while [[ $# -gt 0 ]]; do
@@ -525,6 +559,7 @@ docker_run_orchestrator() {
 
 docker_run_worker() {
     local agent_id="$1"
+    local auto_rm="${2:-false}"
     local container_name="swarm-${RUN_ID}-worker-${agent_id}"
 
     local prompt_file="$LOGS_DIR/worker-$agent_id-prompt.md"
@@ -533,7 +568,11 @@ docker_run_worker() {
     local oauth_token
     oauth_token=$(get_claude_oauth_token) || true
 
+    local extra_flags=()
+    [[ "$auto_rm" == "true" ]] && extra_flags+=("--rm")
+
     docker run -d \
+        "${extra_flags[@]+"${extra_flags[@]}"}" \
         --name "$container_name" \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
@@ -594,13 +633,77 @@ docker_wait_workers() {
     echo "$failed"
 }
 
+check_and_respawn_dead_workers() {
+    local agents="$1"
+    local i
+    for i in $(seq 1 "$agents"); do
+        local cid_file="$OUTPUT_DIR/pids/worker-${i}.cid"
+        [[ -f "$cid_file" ]] || continue
+        local cname
+        cname=$(cat "$cid_file" 2>/dev/null) || continue
+        [[ -z "$cname" ]] && continue
+
+        # "gone" covers both removed-by---rm and inspect failure
+        local running
+        running=$(docker inspect --format='{{.State.Running}}' "$cname" 2>/dev/null) || running="gone"
+        [[ "$running" == "true" ]] && continue
+
+        # Container is not running — check for tasks it left in active/
+        local stuck_count=0
+        local task_file
+        for task_file in "$MAIN_DIR/tasks/active/worker-${i}--"*.md; do
+            [[ -f "$task_file" ]] && stuck_count=$((stuck_count + 1))
+        done
+
+        if [[ "$stuck_count" -gt 0 ]]; then
+            log "Worker $i died with $stuck_count stuck task(s) — unsticking..."
+            local tmp
+            tmp=$(mktemp -d)
+            git clone "$REPO_DIR" "$tmp" -q 2>/dev/null
+            (
+                cd "$tmp"
+                git config user.email "swarm@local"
+                git config user.name "Swarm Harness"
+                local moved=false
+                local sf
+                for sf in tasks/active/worker-${i}--*.md; do
+                    [[ -f "$sf" ]] || continue
+                    local tname
+                    tname=$(basename "$sf" | sed "s/worker-${i}--//")
+                    mv "$sf" "tasks/pending/$tname"
+                    moved=true
+                done
+                if [[ "$moved" == "true" ]]; then
+                    git add -A
+                    git commit -m "harness: unstick worker-${i} tasks after crash" -q
+                    git push origin main -q
+                fi
+            )
+            rm -rf "$tmp"
+            sync_main
+        fi
+
+        # Clean up stale tracking file
+        docker rm "$cname" 2>/dev/null || true
+        rm -f "$cid_file"
+
+        # Respawn if there is still pending work
+        local p
+        p=$(pending_count)
+        if [[ "$p" -gt 0 ]]; then
+            log "Respawning worker $i..."
+            docker_run_worker "$i" "true"
+        fi
+    done
+}
+
 run_with_review() {
     local agents="$1"
 
     # Spawn all workers in background (MULTI_ROUND=true set in docker_run_worker)
     log "Spawning $agents worker agents..."
     for i in $(seq 1 "$agents"); do
-        docker_run_worker "$i"
+        docker_run_worker "$i" "true"
         sleep 1
     done
     echo
@@ -609,6 +712,7 @@ run_with_review() {
     local monitor_pid=$!
 
     local reviewed=()
+    local blocked_reviewed=()
     local review_count=0
     local max_reviews=$(( MAX_WORKER_ITERATIONS * agents ))
     local all_complete=false
@@ -618,6 +722,9 @@ run_with_review() {
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
         sync_main
+
+        # Detect and recover dead workers before scanning for work
+        check_and_respawn_dead_workers "$agents"
 
         local new_reviews_this_cycle=0
 
@@ -658,6 +765,40 @@ run_with_review() {
                 break
             fi
         done
+
+        # Scan pending/ for BLOCKED tasks (worker gave up, needs reviewer intervention)
+        if [[ "$all_complete" == "false" ]]; then
+            for task_file in "$MAIN_DIR/tasks/pending/BLOCKED-"*.md; do
+                [[ -f "$task_file" ]] || continue
+                task_name=$(basename "$task_file")
+
+                local already_blocked_reviewed=false
+                local br
+                for br in "${blocked_reviewed[@]+"${blocked_reviewed[@]}"}"; do
+                    [[ "$br" == "$task_name" ]] && already_blocked_reviewed=true && break
+                done
+                [[ "$already_blocked_reviewed" == "true" ]] && continue
+
+                review_count=$((review_count + 1))
+                new_reviews_this_cycle=$((new_reviews_this_cycle + 1))
+
+                if [[ "$review_count" -gt "$max_reviews" ]]; then
+                    warn "Max reviews ($max_reviews) reached — forcing stop"
+                    all_complete=true
+                    break
+                fi
+
+                log "Running reviewer ${review_count} for blocked task: $task_name"
+                docker_run_reviewer "$task_name" "$review_count"
+                blocked_reviewed+=("$task_name")
+
+                if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                    log "Reviewer signaled ALL_COMPLETE"
+                    all_complete=true
+                    break
+                fi
+            done
+        fi
 
         # Final-drain / stuck-state check: no new reviews this cycle
         if [[ "$all_complete" == "false" && "$new_reviews_this_cycle" -eq 0 ]]; then
@@ -1015,6 +1156,15 @@ main() {
             error "Claude Code CLI not found."
             info "Install from: https://claude.ai/code"
             exit 1
+        fi
+    fi
+
+    # Warn about running containers from prior swarm runs
+    if [[ "$USE_DOCKER" == "true" ]] && command -v docker &>/dev/null; then
+        local prior_count
+        prior_count=$(docker ps -q --filter "name=swarm-" 2>/dev/null | wc -l | tr -d ' ') || prior_count=0
+        if [[ "$prior_count" -gt 0 ]]; then
+            warn "$prior_count swarm container(s) from a prior run are still running — run './swarm cleanup' to stop them"
         fi
     fi
 

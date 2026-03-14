@@ -64,6 +64,38 @@ For each pending task, read its `## Dependencies` section. A task is deadlocked 
 
 Commit and push any fixes, then signal `REVIEW_DONE` (work continues) unless the queue is now truly clear.
 
+**If `COMPLETED_TASK` starts with `BLOCKED-`:**
+
+A worker gave up on this task. Read the task file to understand what was attempted:
+```bash
+cat tasks/pending/{{COMPLETED_TASK}}
+```
+
+Read the `## Blocker` section to understand why the worker gave up. Then take the most appropriate action:
+
+**Option 1 — Break into subtasks** (preferred when the task is too large or vague): Create 2–3 smaller, more specific tasks with concrete `Run: <cmd> → Expected: <output>` acceptance criteria. Number them using the next available NNN values. Then remove the BLOCKED task:
+```bash
+# write the new task files to tasks/pending/
+rm tasks/pending/{{COMPLETED_TASK}}
+git add -A
+git commit -m "reviewer-{{REVIEW_NUM}}: decompose blocked task into subtasks"
+git push origin main
+```
+
+**Option 2 — Add hints and retry** (when the task is valid but the worker lacked context): Edit the task file to add a `## Hints` section with specific implementation guidance (exact file paths, function signatures, commands to run). Then rename it back to the original name (strip the `BLOCKED-` prefix):
+```bash
+# edit tasks/pending/{{COMPLETED_TASK}} to add ## Hints
+ORIG_NAME="${{COMPLETED_TASK}#BLOCKED-}"
+mv "tasks/pending/{{COMPLETED_TASK}}" "tasks/pending/$ORIG_NAME"
+git add -A
+git commit -m "reviewer-{{REVIEW_NUM}}: unblock $ORIG_NAME with hints"
+git push origin main
+```
+
+**Option 3 — Escalate** (when external information or a decision is genuinely required): Move the BLOCKED task to `tasks/done/` (so it is not retried) and add a `NNN-clarification-needed.md` task to `tasks/pending/` explaining exactly what human input is needed.
+
+After taking action, signal `REVIEW_DONE` (unless the queue is otherwise complete).
+
 ### Step 4: Run Tests
 
 Detect and run the project's test suite. This is not optional — running tests catches integration failures that code inspection misses.

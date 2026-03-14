@@ -10,6 +10,7 @@ Dockerfile               ← Container image (node + python + go + claude CLI)
 docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker modes)
 prompts/orchestrator.md  ← Orchestrator prompt template
 prompts/worker.md        ← Worker prompt template
+prompts/reviewer.md      ← Reviewer agent prompt template
 ```
 
 Output directory created per run:
@@ -27,9 +28,16 @@ swarm-TIMESTAMP/
 
 ## How It Works
 
-**Phase 1 — Orchestrator**: writes `SPEC.md`, creates `tasks/pending/NNN-name.md` (5–15 tasks, numbered by dependency order), commits and pushes.
+**Phase 1 — Orchestrator**: writes `SPEC.md`, creates `tasks/pending/NNN-name.md` (numbered by dependency order), commits and pushes. Key rules:
+- Acceptance criteria must be `Run: <cmd>` → `Expected: <output>` format — no vague criteria
+- `## Interfaces` subsections capped at 25 lines (split into `NameCore`/`NameDetails` if larger)
+- Mandatory `001-project-setup.md` and final `NNN-testing-and-verification.md`
+- Mandatory mid-project checkpoint task for 10+ task projects (~40–60% mark)
+- Dependency graph verified before committing: no cycles, no spurious deps, parallelism audited
 
 **Phase 2 — Worker loop**: bash harness calls `claude` repeatedly per worker (stateless sessions). Each invocation: pulls, reads state, claims one task, does work, pushes, emits a signal word.
+
+**Phase 3 — Reviewer loop** (`run_with_review` mode): a reviewer agent runs after task completions, checks implementation against SPEC.md interfaces, runs the test suite (Python/Node/Go auto-detected), and adds fix tasks if tests fail. Signals `ALL_COMPLETE` only when pending is empty, active is empty, and tests pass.
 
 **Task state machine**: `pending/NNN-task.md` → `active/worker-N--NNN-task.md` → `done/NNN-task.md`
 
@@ -48,14 +56,16 @@ swarm-TIMESTAMP/
 
 ## Signal Words
 
-Bash harness reads stdout for these exact strings:
+| Signal | Emitted by | Meaning |
+|--------|-----------|---------|
+| `<promise>TASK_DONE</promise>` | Worker | Task complete, call worker again |
+| `<promise>ALL_DONE</promise>` | Worker | No tasks remain, worker exits |
+| `<promise>NO_TASKS</promise>` | Worker | All tasks active, retry later |
+| `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator | Task files created |
+| `<promise>REVIEW_DONE</promise>` | Reviewer | Reviewed, work continues |
+| `<promise>ALL_COMPLETE</promise>` | Reviewer | Project done, tests passing |
 
-| Signal | Meaning |
-|--------|---------|
-| `<promise>TASK_DONE</promise>` | Task complete, call worker again |
-| `<promise>ALL_DONE</promise>` | No tasks remain, worker exits |
-| `<promise>NO_TASKS</promise>` | All tasks active (other workers finishing), retry later |
-| `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator finished |
+**Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness fires the reviewer with `--stuck--`. The reviewer diagnoses the deadlock (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
 
 ## Docker Execution
 
