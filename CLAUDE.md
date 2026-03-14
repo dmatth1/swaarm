@@ -11,6 +11,7 @@ docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker modes)
 prompts/orchestrator.md  ← Orchestrator prompt template
 prompts/worker.md        ← Worker prompt template
 prompts/reviewer.md      ← Reviewer agent prompt template
+BACKLOG.md               ← Known bugs, missing tests, and planned features
 ```
 
 Output directory created per run:

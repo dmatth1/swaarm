@@ -255,3 +255,7 @@ Claude Code has a native [agent teams feature](https://docs.claude.ai/en/agent-t
 | Best for | Automated pipelines, unattended | Interactive development |
 
 Use swarm when you want to hand off a task and walk away. Use Agent Teams when you want to observe and steer.
+
+## Contributing
+
+Known bugs, missing tests, and planned features are tracked in [`BACKLOG.md`](BACKLOG.md).
