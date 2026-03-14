@@ -1027,14 +1027,7 @@ main() {
 
     local failed=0
     if [[ "$USE_DOCKER" == "true" ]]; then
-        for i in $(seq 1 "$NUM_AGENTS"); do
-            docker_run_worker "$i"
-            sleep 1
-        done
-        monitor_progress &
-        local monitor_pid=$!
-        failed=$(docker_wait_workers "$NUM_AGENTS")
-        kill "$monitor_pid" 2>/dev/null || true
+        run_with_review "$NUM_AGENTS"
     else
         local pids=()
         for i in $(seq 1 "$NUM_AGENTS"); do
