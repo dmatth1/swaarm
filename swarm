@@ -1,0 +1,971 @@
+#!/usr/bin/env bash
+# swarm - Multi-agent AI task execution framework
+# Inspired by Anthropic's multi-agent C compiler project
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROMPTS_DIR="$SCRIPT_DIR/prompts"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log()     { echo -e "${BLUE}[swarm]${NC} $*"; }
+success() { echo -e "${GREEN}[swarm ✓]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[swarm !]${NC} $*"; }
+error()   { echo -e "${RED}[swarm ✗]${NC} $*" >&2; }
+info()    { echo -e "${CYAN}        ${NC} $*"; }
+
+# Defaults
+NUM_AGENTS=3
+OUTPUT_DIR=""
+TASK=""
+VERBOSE=false
+MAX_WORKER_ITERATIONS=100
+USE_DOCKER=true
+DOCKER_IMAGE="swarm-agent"
+RUN_ID=""
+
+usage() {
+    cat <<'EOF'
+swarm — Multi-agent AI task execution framework
+
+Usage:
+  swarm <task> [OPTIONS]
+
+Arguments:
+  task              Natural language description of what to build or do
+
+Options:
+  -n, --agents N    Number of parallel worker agents (default: 3)
+  -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
+  -v, --verbose     Show agent output in real-time
+  --no-docker       Run agents on host instead of in Docker containers
+  -h, --help        Show this help
+
+Subcommands:
+  swarm status <output-dir>           Show live status of a running swarm
+  swarm kill <output-dir> [agent-id]  Kill all agents or a specific one
+                                       agent-id: worker-1, worker-2, ..., orchestrator
+  swarm resume <output-dir> [-n N]    Resume after interruption (rate limit, crash, kill)
+
+Examples:
+  swarm "Build a REST API for a todo app with SQLite"
+  swarm "Create a Python CLI that converts CSV to JSON" --agents 2
+  swarm "Write a complete test suite for this codebase" --output ./tests
+  swarm "Build a static site generator in Go"
+
+Output:
+  swarm-TIMESTAMP/
+  ├── main/        ← Your project lives here
+  ├── logs/        ← Agent logs for debugging
+  └── repo.git/    ← Shared coordination repo
+EOF
+}
+
+# ─────────────────────────────────────────────────────────────
+# SUBCOMMANDS
+# ─────────────────────────────────────────────────────────────
+
+cmd_status() {
+    local output_dir="${1:-}"
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm status <output-dir>"
+        exit 1
+    fi
+    if [[ ! -d "$output_dir/main/tasks" ]]; then
+        error "Not a swarm output directory: $output_dir"
+        exit 1
+    fi
+
+    # Pull latest state
+    (cd "$output_dir/main" && git pull origin main -q 2>/dev/null) || true
+
+    local n_pending n_active n_done
+    n_pending=$(find "$output_dir/main/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    n_active=$(find "$output_dir/main/tasks/active"  -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    n_done=$(find "$output_dir/main/tasks/done"    -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+
+    # Read task description from SPEC.md if available
+    local task_desc=""
+    if [[ -f "$output_dir/main/SPEC.md" ]]; then
+        task_desc=$(grep -m1 '^\*\*Task:\*\*' "$output_dir/main/SPEC.md" 2>/dev/null | sed 's/\*\*Task:\*\* //' || true)
+    fi
+
+    echo
+    echo -e "${CYAN}${BOLD}Swarm Status: $output_dir${NC}"
+    if [[ -n "$task_desc" ]]; then
+        echo -e "   Task:    $task_desc"
+    fi
+    echo
+    echo -e "Tasks:    ${GREEN}${n_done} done${NC} | ${YELLOW}${n_active} active${NC} | ${BLUE}${n_pending} pending${NC}"
+
+    # Worker status
+    local pids_dir="$output_dir/pids"
+    local worker_status_line=""
+    local worker_num=1
+    while true; do
+        local wlog="$output_dir/logs/worker-${worker_num}.log"
+        if [[ ! -f "$wlog" ]]; then
+            break
+        fi
+        local wstatus=""
+        local cid_file="$pids_dir/worker-${worker_num}.cid"
+        local pid_file="$pids_dir/worker-${worker_num}.pid"
+        if [[ -f "$cid_file" ]]; then
+            local wcname
+            wcname=$(cat "$cid_file" 2>/dev/null || echo "")
+            if [[ -n "$wcname" ]] && docker inspect --format='{{.State.Running}}' "$wcname" 2>/dev/null | grep -q true; then
+                wstatus="${GREEN}RUNNING (container)${NC}"
+            else
+                wstatus="${YELLOW}STOPPED${NC}"
+            fi
+        elif [[ -f "$pid_file" ]]; then
+            local wpid
+            wpid=$(cat "$pid_file" 2>/dev/null || echo "")
+            if [[ -n "$wpid" ]] && kill -0 "$wpid" 2>/dev/null; then
+                wstatus="${GREEN}RUNNING (pid $wpid)${NC}"
+            else
+                wstatus="${YELLOW}STALE PID${NC}"
+            fi
+        elif grep -q "DONE at" "$wlog" 2>/dev/null; then
+            wstatus="${GREEN}DONE${NC}"
+        else
+            wstatus="${YELLOW}UNKNOWN${NC}"
+        fi
+        if [[ -n "$worker_status_line" ]]; then
+            worker_status_line="$worker_status_line | worker-${worker_num} $wstatus"
+        else
+            worker_status_line="worker-${worker_num} $wstatus"
+        fi
+        worker_num=$((worker_num + 1))
+    done
+    if [[ -n "$worker_status_line" ]]; then
+        echo -e "Workers:  $worker_status_line"
+    fi
+
+    # Active tasks
+    if [[ "$n_active" -gt 0 ]]; then
+        echo
+        echo "Active tasks:"
+        local active_file
+        for active_file in "$output_dir/main/tasks/active"/worker-*.md; do
+            if [[ -f "$active_file" ]]; then
+                local fname
+                fname=$(basename "$active_file")
+                # fname pattern: worker-N--NNN-taskname.md
+                local wid taskname
+                wid=$(echo "$fname" | sed 's/worker-\([^-]*\)--.*/\1/')
+                taskname=$(echo "$fname" | sed 's/worker-[^-]*--//')
+                echo "  worker-${wid}: $taskname"
+            fi
+        done
+    fi
+
+    # Done tasks
+    if [[ "$n_done" -gt 0 ]]; then
+        echo
+        echo "Done:"
+        local done_file
+        for done_file in "$output_dir/main/tasks/done"/*.md; do
+            if [[ -f "$done_file" ]]; then
+                echo "  $(basename "$done_file")"
+            fi
+        done
+    fi
+
+    echo
+}
+
+cmd_kill() {
+    local output_dir="${1:-}"
+    local target="${2:-}"
+
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm kill <output-dir> [agent-id]"
+        exit 1
+    fi
+
+    local pids_dir="$output_dir/pids"
+    if [[ ! -d "$pids_dir" ]]; then
+        error "No pids directory found in: $output_dir"
+        exit 1
+    fi
+
+    if [[ -n "$target" ]]; then
+        # Kill specific target — try container first, then PID
+        local cid_file="$pids_dir/${target}.cid"
+        local pid_file="$pids_dir/${target}.pid"
+        if [[ -f "$cid_file" ]]; then
+            local cname
+            cname=$(cat "$cid_file" 2>/dev/null || echo "")
+            if [[ -n "$cname" ]]; then
+                docker stop "$cname" 2>/dev/null || true
+                docker rm "$cname" 2>/dev/null || true
+                rm -f "$cid_file"
+                success "Stopped $target (container $cname)"
+            fi
+        elif [[ -f "$pid_file" ]]; then
+            local pid
+            pid=$(cat "$pid_file" 2>/dev/null || echo "")
+            if [[ -n "$pid" ]]; then
+                kill "$pid" 2>/dev/null || true
+                rm -f "$pid_file"
+                success "Killed $target (pid $pid)"
+            else
+                warn "PID file empty for $target"
+                rm -f "$pid_file"
+            fi
+        else
+            error "No tracking file found for: $target"
+            exit 1
+        fi
+    else
+        # Kill all — containers
+        local cid_file cname name
+        for cid_file in "$pids_dir"/*.cid; do
+            if [[ -f "$cid_file" ]]; then
+                name=$(basename "$cid_file" .cid)
+                cname=$(cat "$cid_file" 2>/dev/null || echo "")
+                if [[ -n "$cname" ]]; then
+                    docker stop "$cname" 2>/dev/null || true
+                    docker rm "$cname" 2>/dev/null || true
+                    success "Stopped $name (container $cname)"
+                fi
+                rm -f "$cid_file"
+            fi
+        done
+        # Kill all — PIDs
+        local pid_file pid
+        for pid_file in "$pids_dir"/*.pid; do
+            if [[ -f "$pid_file" ]]; then
+                name=$(basename "$pid_file" .pid)
+                pid=$(cat "$pid_file" 2>/dev/null || echo "")
+                if [[ -n "$pid" ]]; then
+                    kill "$pid" 2>/dev/null || true
+                    success "Killed $name (pid $pid)"
+                fi
+                rm -f "$pid_file"
+            fi
+        done
+    fi
+}
+
+cmd_resume() {
+    local output_dir="${1:-}"
+    local override_agents="${2:-}"
+
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm resume <output-dir> [-n N]"
+        exit 1
+    fi
+    if [[ ! -d "$output_dir/main/tasks" ]]; then
+        error "Not a swarm output directory: $output_dir"
+        exit 1
+    fi
+
+    local state_file="$output_dir/swarm.state"
+    if [[ ! -f "$state_file" ]]; then
+        error "No state file found: $state_file"
+        info "To resume manually: move tasks/active/*.md back to tasks/pending/ and re-run workers"
+        exit 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS, SWARM_DOCKER
+
+    local agents="${override_agents:-$SWARM_AGENTS}"
+    USE_DOCKER="${SWARM_DOCKER:-true}"
+
+    OUTPUT_DIR="$(cd "$output_dir" && pwd)"
+    REPO_DIR="$OUTPUT_DIR/repo.git"
+    LOGS_DIR="$OUTPUT_DIR/logs"
+    MAIN_DIR="$OUTPUT_DIR/main"
+
+    echo
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║       🐝  SWARM RESUME  🐝               ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo
+    info "Task:   $SWARM_TASK"
+    info "Agents: $agents"
+    info "Output: $OUTPUT_DIR"
+    echo
+
+    # Pull latest state
+    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+    # Return any stuck tasks (worker-N--NNN-task.md) back to pending
+    local unstick_dir
+    unstick_dir=$(mktemp -d)
+    git clone "$REPO_DIR" "$unstick_dir" -q 2>/dev/null
+    (
+        cd "$unstick_dir"
+        git config user.email "swarm@local"
+        git config user.name "Swarm Resume"
+        local any_moved=false
+        for sf in tasks/active/worker-*.md; do
+            if [[ -f "$sf" ]]; then
+                local tname
+                tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
+                log "  Returning stuck task: $tname"
+                mv "$sf" "tasks/pending/$tname"
+                any_moved=true
+            fi
+        done
+        if [[ "$any_moved" == "true" ]]; then
+            git add -A
+            git commit -m "resume: return stuck tasks to pending" -q
+            git push origin main -q
+        fi
+    )
+    rm -rf "$unstick_dir"
+
+    # Sync main view
+    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+    local pending done_n
+    pending=$(find "$MAIN_DIR/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    done_n=$(find "$MAIN_DIR/tasks/done" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+
+    if [[ "$pending" -eq 0 ]]; then
+        success "Nothing to resume — all tasks already complete ($done_n done)"
+        info "Project files: $MAIN_DIR/"
+        exit 0
+    fi
+
+    success "$pending task(s) pending, $done_n done — spawning $agents worker(s)"
+    echo
+
+    # Spawn workers
+    local failed=0
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        RUN_ID="$(basename "$OUTPUT_DIR")"
+        ensure_docker_image
+        for i in $(seq 1 "$agents"); do
+            docker_run_worker "$i"
+            sleep 1
+        done
+        monitor_progress &
+        local monitor_pid=$!
+        failed=$(docker_wait_workers "$agents")
+        kill "$monitor_pid" 2>/dev/null || true
+    else
+        # Remove old worker dirs so run_worker clones fresh
+        for i in $(seq 1 "$agents"); do
+            rm -rf "$OUTPUT_DIR/worker-$i"
+        done
+        local pids=()
+        for i in $(seq 1 "$agents"); do
+            run_worker "$i" &
+            pids+=($!)
+            sleep 1
+        done
+        monitor_progress &
+        local monitor_pid=$!
+        for pid in "${pids[@]}"; do
+            wait "$pid" || { ((failed++)) || true; }
+        done
+        kill "$monitor_pid" 2>/dev/null || true
+    fi
+
+    # Final sync
+    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+    local total_done total_pending total_active
+    total_done=$(find "$MAIN_DIR/tasks/done" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    total_pending=$(find "$MAIN_DIR/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    total_active=$(find "$MAIN_DIR/tasks/active" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+
+    echo
+    success "Tasks completed: $total_done"
+    if [[ "$total_pending" -gt 0 ]]; then warn "Tasks incomplete: $total_pending"; fi
+    if [[ "$total_active"  -gt 0 ]]; then warn "Tasks stuck:      $total_active (run resume again)"; fi
+    echo
+    info "Project files: $MAIN_DIR/"
+    info "Agent logs:    $LOGS_DIR/"
+    echo
+
+    if [[ "${failed:-0}" -gt 0 ]]; then warn "${failed} worker(s) exited with errors (check logs)"; fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# PARSE ARGUMENTS
+# ─────────────────────────────────────────────────────────────
+
+# Check for subcommands first
+case "${1:-}" in
+    status)
+        shift
+        cmd_status "${1:-}"
+        exit 0
+        ;;
+    kill)
+        shift
+        cmd_kill "${1:-}" "${2:-}"
+        exit 0
+        ;;
+    resume)
+        shift
+        output_dir="${1:-}"
+        override_agents=""
+        shift 2>/dev/null || true
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                -n|--agents) override_agents="$2"; shift 2 ;;
+                --no-docker) USE_DOCKER=false; shift ;;
+                *) shift ;;
+            esac
+        done
+        cmd_resume "$output_dir" "$override_agents"
+        exit 0
+        ;;
+esac
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -n|--agents)    NUM_AGENTS="$2"; shift 2 ;;
+        -o|--output)    OUTPUT_DIR="$2"; shift 2 ;;
+        -v|--verbose)   VERBOSE=true; shift ;;
+        --no-docker)    USE_DOCKER=false; shift ;;
+        -h|--help)      usage; exit 0 ;;
+        -*)             error "Unknown option: $1"; usage; exit 1 ;;
+        *)              TASK="${TASK:+$TASK }$1"; shift ;;
+    esac
+done
+
+[[ -z "$TASK" ]] && { error "No task specified."; echo; usage; exit 1; }
+[[ -z "$OUTPUT_DIR" ]] && OUTPUT_DIR="./swarm-$(date +%Y%m%d-%H%M%S)"
+
+# Resolve to absolute path
+OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_DIR")" 2>/dev/null && pwd)/$(basename "$OUTPUT_DIR")" || OUTPUT_DIR="$(pwd)/$(basename "$OUTPUT_DIR")"
+
+REPO_DIR="$OUTPUT_DIR/repo.git"
+LOGS_DIR="$OUTPUT_DIR/logs"
+MAIN_DIR="$OUTPUT_DIR/main"
+
+# ─────────────────────────────────────────────────────────────
+# DOCKER HELPERS
+# ─────────────────────────────────────────────────────────────
+
+get_claude_oauth_token() {
+    # Extract OAuth access token from macOS Keychain for injection into Docker containers
+    local creds
+    creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
+    # Parse the accessToken field from the JSON credential
+    echo "$creds" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null
+}
+
+ensure_docker_image() {
+    if docker image inspect "$DOCKER_IMAGE" &>/dev/null; then
+        log "Docker image '$DOCKER_IMAGE' found"
+        return 0
+    fi
+    log "Building Docker image '$DOCKER_IMAGE' (first run only)..."
+    docker build -t "$DOCKER_IMAGE" "$SCRIPT_DIR"
+}
+
+docker_run_orchestrator() {
+    log "Starting orchestrator container..."
+
+    local prompt_file="$LOGS_DIR/orchestrator-prompt.md"
+    sed "s|{{TASK}}|$TASK|g" "$PROMPTS_DIR/orchestrator.md" > "$prompt_file"
+
+    local container_name="swarm-${RUN_ID}-orchestrator"
+
+    log "Orchestrator analyzing task and creating subtasks..."
+
+    local oauth_token
+    oauth_token=$(get_claude_oauth_token) || true
+
+    docker run --rm \
+        --name "$container_name" \
+        -v "$REPO_DIR:/upstream" \
+        -v "$LOGS_DIR:/logs" \
+        -v "$PROMPTS_DIR:/prompts:ro" \
+        ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
+        -e TASK="$TASK" \
+        -e VERBOSE="$VERBOSE" \
+        "$DOCKER_IMAGE" \
+        orchestrator || true
+
+    # Sync to see what was created
+    sync_main
+
+    local tasks
+    tasks=$(pending_count)
+
+    if [[ "$tasks" -gt 0 ]]; then
+        success "Orchestrator created $tasks tasks"
+        if [[ "$VERBOSE" == "true" ]]; then
+            log "Tasks:"
+            ls "$MAIN_DIR/tasks/pending/" | sed 's/^/    /'
+        fi
+        return 0
+    else
+        error "Orchestrator failed to create tasks. Check: $LOGS_DIR/orchestrator.log"
+        if [[ -f "$LOGS_DIR/orchestrator.log" ]]; then
+            if grep -qi "error\|failed\|exception" "$LOGS_DIR/orchestrator.log" 2>/dev/null; then
+                tail -20 "$LOGS_DIR/orchestrator.log" >&2
+            fi
+        fi
+        return 1
+    fi
+}
+
+docker_run_worker() {
+    local agent_id="$1"
+    local container_name="swarm-${RUN_ID}-worker-${agent_id}"
+
+    local prompt_file="$LOGS_DIR/worker-$agent_id-prompt.md"
+    sed "s|{{AGENT_ID}}|worker-$agent_id|g" "$PROMPTS_DIR/worker.md" > "$prompt_file"
+
+    local oauth_token
+    oauth_token=$(get_claude_oauth_token) || true
+
+    docker run -d \
+        --name "$container_name" \
+        -v "$REPO_DIR:/upstream" \
+        -v "$LOGS_DIR:/logs" \
+        -v "$PROMPTS_DIR:/prompts:ro" \
+        ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
+        -e AGENT_ID="worker-$agent_id" \
+        -e VERBOSE="$VERBOSE" \
+        -e MAX_WORKER_ITERATIONS="$MAX_WORKER_ITERATIONS" \
+        "$DOCKER_IMAGE" \
+        worker "$agent_id" > /dev/null
+
+    # Track container for kill/status
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "$container_name" > "$OUTPUT_DIR/pids/worker-${agent_id}.cid"
+}
+
+docker_wait_workers() {
+    local agents="$1"
+    local failed=0
+    for i in $(seq 1 "$agents"); do
+        local container_name="swarm-${RUN_ID}-worker-${i}"
+        local exit_code
+        exit_code=$(docker wait "$container_name" 2>/dev/null) || exit_code=1
+        if [[ "$exit_code" -ne 0 ]]; then
+            ((failed++)) || true
+        fi
+        # Log final status
+        local log_file="$LOGS_DIR/worker-$i.log"
+        if [[ -f "$log_file" ]] && grep -q "DONE at" "$log_file" 2>/dev/null; then
+            success "Worker $i: completed" >&2
+        fi
+        # Cleanup stopped container
+        docker rm "$container_name" >/dev/null 2>&1 || true
+        rm -f "$OUTPUT_DIR/pids/worker-${i}.cid" 2>/dev/null || true
+    done
+    echo "$failed"
+}
+
+cleanup_docker() {
+    if [[ "$USE_DOCKER" == "true" && -n "$RUN_ID" ]]; then
+        docker ps -q --filter "name=swarm-${RUN_ID}-" 2>/dev/null | xargs -r docker stop 2>/dev/null || true
+        docker ps -aq --filter "name=swarm-${RUN_ID}-" 2>/dev/null | xargs -r docker rm 2>/dev/null || true
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────
+
+# Run claude non-interactively in a given directory with a prompt file
+# Uses stdin piping to handle large prompts safely
+claude_run() {
+    local dir="$1"
+    local prompt_file="$2"
+    local log_file="${3:-/dev/stderr}"
+
+    if [[ "$VERBOSE" == "true" ]]; then
+        (cd "$dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee -a "$log_file"
+    else
+        (cd "$dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) >> "$log_file" 2>&1
+        cat "$log_file"
+    fi
+}
+
+# Count .md files in a dir (safe: returns 0 when empty or missing)
+count_files() {
+    local dir="$1"
+    find "$dir" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0
+}
+
+sync_main() {
+    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+}
+
+pending_count() { count_files "$MAIN_DIR/tasks/pending"; }
+active_count()  { count_files "$MAIN_DIR/tasks/active"; }
+done_count()    { count_files "$MAIN_DIR/tasks/done"; }
+
+# ─────────────────────────────────────────────────────────────
+# WORKSPACE INITIALIZATION
+# ─────────────────────────────────────────────────────────────
+
+init_workspace() {
+    log "Creating workspace: $OUTPUT_DIR"
+    mkdir -p "$REPO_DIR" "$LOGS_DIR"
+
+    # Init bare repo (shared coordination point)
+    git init --bare "$REPO_DIR" -q
+
+    # Bootstrap with initial structure
+    local bootstrap_dir
+    bootstrap_dir=$(mktemp -d)
+    git clone "$REPO_DIR" "$bootstrap_dir" -q 2>/dev/null
+
+    (
+        cd "$bootstrap_dir"
+        git config user.email "swarm@local"
+        git config user.name "Swarm"
+
+        mkdir -p tasks/pending tasks/active tasks/done
+        # Git doesn't track empty dirs — .gitkeep ensures workers get all task dirs
+        touch tasks/pending/.gitkeep tasks/active/.gitkeep tasks/done/.gitkeep
+
+        cat > SPEC.md <<SPECEOF
+# Project Specification
+
+**Task:** $TASK
+
+*The orchestrator agent will replace this with a full specification.*
+SPECEOF
+
+        cat > PROGRESS.md <<PROGEOF
+# Progress
+
+**Task:** $TASK
+**Status:** INITIALIZING
+
+*Updated by agents as work progresses.*
+PROGEOF
+
+        git add -A
+        git commit -m "init: workspace bootstrap" -q
+        git push origin main -q
+    )
+
+    rm -rf "$bootstrap_dir"
+
+    # Clone the "main" view (read results here)
+    git clone "$REPO_DIR" "$MAIN_DIR" -q 2>/dev/null
+    (
+        cd "$MAIN_DIR"
+        git config user.email "swarm@local"
+        git config user.name "Swarm"
+    )
+
+    success "Workspace ready"
+}
+
+# ─────────────────────────────────────────────────────────────
+# ORCHESTRATOR
+# ─────────────────────────────────────────────────────────────
+
+run_orchestrator() {
+    log "Starting orchestrator agent..."
+
+    # Write PID so we can be killed externally
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo $$ > "$OUTPUT_DIR/pids/orchestrator.pid"
+
+    local orch_dir="$OUTPUT_DIR/orchestrator"
+    git clone "$REPO_DIR" "$orch_dir" -q 2>/dev/null
+
+    (
+        cd "$orch_dir"
+        git config user.email "orchestrator@swarm"
+        git config user.name "Swarm Orchestrator"
+    )
+
+    # Inject task into prompt
+    local prompt_file="$LOGS_DIR/orchestrator-prompt.md"
+    sed "s|{{TASK}}|$TASK|g" "$PROMPTS_DIR/orchestrator.md" > "$prompt_file"
+
+    local log_file="$LOGS_DIR/orchestrator.log"
+
+    log "Orchestrator analyzing task and creating subtasks..."
+
+    # Run orchestrator (unset CLAUDECODE to allow nested Claude sessions)
+    if [[ "$VERBOSE" == "true" ]]; then
+        (cd "$orch_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee "$log_file" || true
+    else
+        (cd "$orch_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) > "$log_file" 2>&1 || true
+    fi
+
+    # Sync to see what was created
+    sync_main
+
+    local tasks
+    tasks=$(pending_count)
+
+    if [[ "$tasks" -gt 0 ]]; then
+        success "Orchestrator created $tasks tasks"
+        if [[ "$VERBOSE" == "true" ]]; then
+            log "Tasks:"
+            ls "$MAIN_DIR/tasks/pending/" | sed 's/^/    /'
+        fi
+        return 0
+    else
+        error "Orchestrator failed to create tasks. Check: $log_file"
+        if grep -qi "error\|failed\|exception" "$log_file" 2>/dev/null; then
+            tail -20 "$log_file" >&2
+        fi
+        return 1
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# WORKER
+# ─────────────────────────────────────────────────────────────
+
+run_worker() {
+    local agent_id="$1"
+    local worker_dir="$OUTPUT_DIR/worker-$agent_id"
+    local log_file="$LOGS_DIR/worker-$agent_id.log"
+    local prompt_file="$LOGS_DIR/worker-$agent_id-prompt.md"
+    local pid_file="$OUTPUT_DIR/pids/worker-$agent_id.pid"
+
+    # Write PID so we can be killed externally; clean up on exit
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo $$ > "$pid_file"
+    trap 'rm -f "$pid_file"' EXIT
+
+    git clone "$REPO_DIR" "$worker_dir" -q 2>/dev/null
+
+    (
+        cd "$worker_dir"
+        git config user.email "worker-$agent_id@swarm"
+        git config user.name "Swarm Worker $agent_id"
+    )
+
+    # Inject agent ID into prompt
+    sed "s|{{AGENT_ID}}|worker-$agent_id|g" "$PROMPTS_DIR/worker.md" > "$prompt_file"
+
+    echo "=== Worker $agent_id started $(date) ===" > "$log_file"
+
+    local iteration=0
+
+    while [[ $iteration -lt $MAX_WORKER_ITERATIONS ]]; do
+        iteration=$((iteration + 1))
+
+        # Pull latest state
+        (cd "$worker_dir" && git pull origin main -q 2>/dev/null) || true
+
+        # Count work available
+        local pending own_active all_active
+        pending=$(count_files "$worker_dir/tasks/pending")
+        own_active=$(find "$worker_dir/tasks/active/" -maxdepth 1 -name "worker-$agent_id--*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+        all_active=$(count_files "$worker_dir/tasks/active")
+
+        # If no work for this agent
+        if [[ "$pending" -eq 0 && "$own_active" -eq 0 ]]; then
+            if [[ "$all_active" -eq 0 ]]; then
+                success "Worker $agent_id: all tasks complete"
+                echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
+                return 0
+            else
+                # Other workers still active, wait
+                if [[ "$VERBOSE" == "true" ]]; then log "Worker $agent_id: waiting (others still active: $all_active)"; fi
+                sleep 5
+                continue
+            fi
+        fi
+
+        if [[ "$VERBOSE" == "true" ]]; then log "Worker $agent_id: iteration $iteration (pending=$pending, own_active=$own_active)"; fi
+
+        echo -e "\n--- Worker $agent_id Iteration $iteration ($(date)) ---" >> "$log_file"
+        echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
+
+        # Run one agent session (claims and completes one task)
+        local output exit_code
+        if [[ "$VERBOSE" == "true" ]]; then
+            output=$( (cd "$worker_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee -a "$log_file" ) || true
+        else
+            output=$( (cd "$worker_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 ) || true
+            echo "$output" >> "$log_file"
+        fi
+
+        # Check completion signals
+        if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|WORKER.*DONE"; then
+            success "Worker $agent_id: signaled completion"
+            echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
+            return 0
+        fi
+
+        sleep 2
+    done
+
+    warn "Worker $agent_id: reached max iterations ($MAX_WORKER_ITERATIONS)"
+    echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
+    return 0
+}
+
+# ─────────────────────────────────────────────────────────────
+# PROGRESS MONITOR (background)
+# ─────────────────────────────────────────────────────────────
+
+monitor_progress() {
+    local interval=15
+    while true; do
+        sleep $interval
+        sync_main 2>/dev/null || true
+        local p a d
+        p=$(pending_count)
+        a=$(active_count)
+        d=$(done_count)
+        log "Progress: ${GREEN}${d} done${NC} | ${YELLOW}${a} active${NC} | ${BLUE}${p} pending${NC}"
+    done
+}
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
+
+main() {
+    echo
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║       🐝  SWARM FRAMEWORK  🐝            ║${NC}"
+    echo -e "${CYAN}${BOLD}║     Multi-Agent Task Execution           ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo
+    info "Task:   $TASK"
+    info "Agents: $NUM_AGENTS"
+    info "Output: $OUTPUT_DIR"
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        info "Mode:   Docker"
+    else
+        info "Mode:   bare-metal (--no-docker)"
+    fi
+    echo
+
+    # Check prerequisites
+    if ! command -v git &>/dev/null; then
+        error "git not found. Please install git."
+        exit 1
+    fi
+
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        if ! command -v docker &>/dev/null; then
+            error "Docker not found. Install Docker or use --no-docker."
+            exit 1
+        fi
+    else
+        if ! command -v claude &>/dev/null; then
+            error "Claude Code CLI not found."
+            info "Install from: https://claude.ai/code"
+            exit 1
+        fi
+    fi
+
+    RUN_ID="$(basename "$OUTPUT_DIR")"
+
+    # Step 1: Initialize workspace
+    init_workspace
+    echo
+
+    # Write state file so 'swarm resume' can restart this run
+    {
+        printf 'SWARM_TASK=%q\n' "$TASK"
+        printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
+        printf 'SWARM_DOCKER=%s\n' "$USE_DOCKER"
+        printf 'SWARM_STARTED="%s"\n' "$(date)"
+    } > "$OUTPUT_DIR/swarm.state"
+
+    # Build Docker image if needed
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        ensure_docker_image
+        trap cleanup_docker EXIT
+        echo
+    fi
+
+    # Step 2: Run orchestrator
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        if ! docker_run_orchestrator; then
+            error "Orchestration failed."
+            exit 1
+        fi
+    else
+        if ! run_orchestrator; then
+            error "Orchestration failed."
+            exit 1
+        fi
+    fi
+    echo
+
+    # Step 3: Spawn workers in parallel
+    log "Spawning $NUM_AGENTS worker agents..."
+    echo
+
+    local failed=0
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        for i in $(seq 1 "$NUM_AGENTS"); do
+            docker_run_worker "$i"
+            sleep 1
+        done
+        monitor_progress &
+        local monitor_pid=$!
+        failed=$(docker_wait_workers "$NUM_AGENTS")
+        kill "$monitor_pid" 2>/dev/null || true
+    else
+        local pids=()
+        for i in $(seq 1 "$NUM_AGENTS"); do
+            run_worker "$i" &
+            pids+=($!)
+            sleep 1
+        done
+        monitor_progress &
+        local monitor_pid=$!
+        for pid in "${pids[@]}"; do
+            wait "$pid" || { ((failed++)) || true; }
+        done
+        kill "$monitor_pid" 2>/dev/null || true
+    fi
+
+    # Final sync
+    sync_main 2>/dev/null || true
+
+    local total_done total_pending total_active
+    total_done=$(done_count)
+    total_pending=$(pending_count)
+    total_active=$(active_count)
+
+    echo
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║                RESULTS                   ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo
+
+    success "Tasks completed:  $total_done"
+    if [[ "$total_pending" -gt 0 ]]; then warn "Tasks incomplete: $total_pending"; fi
+    if [[ "$total_active"  -gt 0 ]]; then warn "Tasks stuck:      $total_active"; fi
+    echo
+    info "Project files: $MAIN_DIR/"
+    info "Agent logs:    $LOGS_DIR/"
+    echo
+    info "View your project:"
+    echo "    ls $MAIN_DIR"
+    echo "    cat $MAIN_DIR/PROGRESS.md"
+    echo
+
+    if [[ "$total_done" -eq 0 ]]; then
+        error "No tasks completed. Check logs in $LOGS_DIR/"
+        exit 1
+    fi
+
+    if [[ "${failed:-0}" -gt 0 ]]; then warn "${failed} worker(s) exited with errors (check logs)"; fi
+
+    success "Swarm complete! 🐝"
+    echo
+}
+
+main "$@"
