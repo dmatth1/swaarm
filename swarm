@@ -611,6 +611,58 @@ docker_run_reviewer() {
         reviewer || true
 }
 
+docker_run_specialist() {
+    local specialist_name="$1"
+    local specialist_role="$2"
+    local specialist_num="$3"
+    local container_name="swarm-${RUN_ID}-specialist-${specialist_name}-${specialist_num}"
+
+    local oauth_token
+    oauth_token=$(get_claude_oauth_token) || true
+
+    docker run --rm \
+        --name "$container_name" \
+        -v "$REPO_DIR:/upstream" \
+        -v "$LOGS_DIR:/logs" \
+        -v "$PROMPTS_DIR:/prompts:ro" \
+        ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
+        -e SPECIALIST_NAME="$specialist_name" \
+        -e SPECIALIST_ROLE="$specialist_role" \
+        -e SPECIALIST_NUM="$specialist_num" \
+        -e VERBOSE="$VERBOSE" \
+        "$DOCKER_IMAGE" \
+        specialist || true
+}
+
+# Run all specialists defined in SPEC.md ## Specialists section.
+# specialist_count_ref is the name of a variable in the caller's scope to increment.
+run_specialist_sweep() {
+    local sweep_label="$1"
+    local -n _spec_count="$2"   # nameref — caller passes variable name
+
+    # Parse specialist names from SPEC.md (after ## Specialists, ### Name lines)
+    local spec_names
+    spec_names=$(awk '/^## Specialists/{found=1; next} found && /^## [^#]/{exit} found && /^### /{sub(/^### /,""); print}' \
+        "$MAIN_DIR/SPEC.md" 2>/dev/null) || true
+
+    [[ -z "$spec_names" ]] && return 0
+
+    log "Running specialist sweep: ${sweep_label}"
+    local sname
+    while IFS= read -r sname; do
+        [[ -z "$sname" ]] && continue
+        local srole
+        srole=$(awk -v name="$sname" '$0 == "### " name {found=1; next} found && /^### /{exit} found && NF{print}' \
+            "$MAIN_DIR/SPEC.md" 2>/dev/null) || true
+        [[ -z "$srole" ]] && continue
+
+        _spec_count=$(( _spec_count + 1 ))
+        log "  Specialist: $sname"
+        docker_run_specialist "$sname" "$srole" "$_spec_count"
+        sync_main
+    done <<< "$spec_names"
+}
+
 docker_wait_workers() {
     local agents="$1"
     local failed=0
@@ -714,10 +766,13 @@ run_with_review() {
     local reviewed=()
     local blocked_reviewed=()
     local review_count=0
+    local specialist_count=0
     local max_reviews=$(( MAX_WORKER_ITERATIONS * agents ))
     local all_complete=false
     local stuck_cycles=0
     local max_stuck_cycles=3
+    local last_specialist_sweep=0
+    local specialist_interval="${SPECIALIST_INTERVAL:-5}"
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -800,14 +855,25 @@ run_with_review() {
             done
         fi
 
+        # Run specialist sweep if enough tasks have completed since last sweep
+        if [[ "$all_complete" == "false" ]]; then
+            local current_done
+            current_done=$(done_count)
+            if [[ "$current_done" -gt 0 && "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
+                run_specialist_sweep "after ${current_done} tasks" specialist_count
+                last_specialist_sweep="$current_done"
+            fi
+        fi
+
         # Final-drain / stuck-state check: no new reviews this cycle
         if [[ "$all_complete" == "false" && "$new_reviews_this_cycle" -eq 0 ]]; then
             local p_count a_count
             p_count=$(pending_count)
             a_count=$(active_count)
             if [[ "$p_count" -eq 0 && "$a_count" -eq 0 ]]; then
-                # Queue fully drained — run final confirmation pass
+                # Queue fully drained — run final specialist sweep then confirmation pass
                 stuck_cycles=0
+                run_specialist_sweep "final" specialist_count
                 review_count=$((review_count + 1))
                 if [[ "$review_count" -gt "$max_reviews" ]]; then
                     warn "Max reviews ($max_reviews) reached — forcing stop"

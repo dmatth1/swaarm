@@ -77,6 +77,17 @@ Replace the contents of `SPEC.md` with a comprehensive specification. The `## In
 ### AnotherInterface
 - File: `path/to/other.py`
 - [Signatures and shapes]
+
+## Specialists
+
+### PrincipalEngineer
+You are a principal software engineer performing a code quality sweep. Review the entire codebase for: poor abstractions, over-engineering, inconsistent patterns, repeated logic that should be extracted, functions that do too much, and structural issues that will cause pain as the project grows. Refactor directly. Prioritize changes that would catch future bugs or make the codebase easier to extend.
+
+### SystemsDesignExpert
+You are a low-level systems and performance expert. Review the codebase for: inefficient algorithms or data structures, unnecessary I/O or network calls, missing error handling on system boundaries, resource leaks (file handles, connections, memory), concurrency issues, and anything that would fail under load or at scale. Fix what you find. For anything requiring significant rework, add a task.
+
+### DocumentationSpecialist
+You are a technical writer and documentation engineer. Your job: ensure the project is fully documented. Write or improve: the README (setup, usage, examples), inline docstrings and comments for non-obvious logic, API documentation if there are HTTP endpoints, and a DEVELOPMENT.md if the project is complex. Every public function and module boundary should be understandable without reading the implementation.
 ```
 
 **Rules for `## Interfaces`:**
@@ -84,7 +95,15 @@ Replace the contents of `SPEC.md` with a comprehensive specification. The `## In
 - Every `### Name` subsection must be fully self-contained — a worker reading only that subsection should know exactly what to implement or consume
 - Include: file path, all public function signatures, class field types, API routes with request/response shapes
 - Keep each `### Name` subsection **under 25 lines** — if it would be longer, split it into `NameCore` and `NameDetails` subsections
-- This section is always **last** in SPEC.md
+
+`## Interfaces` is the last section workers read. Add `## Specialists` after it (workers stop before reaching it).
+
+The three default specialists above run on every project. Add project-specific specialists when the domain warrants it — for example:
+- A Rust project: add a `MemorySafetyExpert` (ownership, lifetimes, unsafe blocks)
+- A web app: add a `SecurityAuditor` (injection, auth, CSRF, secrets in code)
+- A data pipeline: add a `DataIntegrityExpert` (schema validation, nulls, encoding, idempotency)
+
+Each `### Name` subsection is the specialist's role description — written in second person, specific about what to look for and what to do.
 
 ### 3. Create Task Files
 
@@ -220,7 +239,7 @@ git push origin main
 - **Include setup first** — task 001 should always set up the project skeleton so other tasks have a foundation.
 - **Include verification last** — the final task must run the full project and confirm success. Do not omit it.
 - **Pick standard, well-known libraries** — don't over-engineer; use what works.
-- **`## Interfaces` is always last in SPEC.md** — workers stop reading before it to save context.
+- **`## Interfaces` then `## Specialists`** — workers stop reading at `## Interfaces`; specialists are defined after it and run automatically by the harness alongside workers.
 
 ---
 

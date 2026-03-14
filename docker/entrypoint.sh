@@ -79,6 +79,46 @@ run_reviewer() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# SPECIALIST MODE
+# ─────────────────────────────────────────────────────────────
+
+run_specialist() {
+    local specialist_name="${SPECIALIST_NAME:-specialist}"
+    local specialist_role="${SPECIALIST_ROLE:-}"
+    local specialist_num="${SPECIALIST_NUM:-0}"
+    local log_file="/logs/specialist-${specialist_name}-${specialist_num}.log"
+
+    echo "=== Specialist ${specialist_name} (${specialist_num}) started $(date) ===" > "$log_file"
+
+    # Clone bare repo
+    git clone /upstream /workspace -q 2>/dev/null
+    cd /workspace
+    git config user.email "${specialist_name}@swarm"
+    git config user.name "Swarm ${specialist_name}"
+
+    # Prepare prompt — substitute SPECIALIST_NAME, SPECIALIST_ROLE, SPECIALIST_NUM
+    local prompt
+    prompt=$(sed -e "s|{{SPECIALIST_NAME}}|${specialist_name}|g" \
+                 -e "s|{{SPECIALIST_NUM}}|${specialist_num}|g" \
+                 /prompts/specialist.md)
+    # Inject role (may contain newlines and special chars — use a temp file)
+    local role_escaped
+    role_escaped=$(printf '%s\n' "$specialist_role" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    prompt=$(echo "$prompt" | awk -v role="$specialist_role" '{
+        if ($0 ~ /\{\{SPECIALIST_ROLE\}\}/) {
+            gsub(/\{\{SPECIALIST_ROLE\}\}/, "")
+            print role
+        } else {
+            print
+        }
+    }')
+
+    echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1 || true
+
+    echo "=== Specialist ${specialist_name} (${specialist_num}) finished $(date) ===" >> "$log_file"
+}
+
+# ─────────────────────────────────────────────────────────────
 # WORKER MODE
 # ─────────────────────────────────────────────────────────────
 
@@ -184,8 +224,11 @@ case "$ROLE" in
     reviewer)
         run_reviewer
         ;;
+    specialist)
+        run_specialist
+        ;;
     *)
-        echo "Unknown role: $ROLE (expected orchestrator, worker, or reviewer)" >&2
+        echo "Unknown role: $ROLE (expected orchestrator, worker, reviewer, or specialist)" >&2
         exit 1
         ;;
 esac
