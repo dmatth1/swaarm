@@ -182,15 +182,7 @@ run_worker() {
             fi
         fi
 
-        # Only count iterations where we actually invoke Claude
-        iteration=$((iteration + 1))
-        if [[ $iteration -gt $max_iterations ]]; then
-            echo "Worker $agent_id: reached max iterations ($max_iterations)" >> "$log_file"
-            echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
-            exit 0
-        fi
-
-        echo -e "\n--- Worker $agent_id Iteration $iteration ($(date)) ---" >> "$log_file"
+        echo -e "\n--- Worker $agent_id (pending attempt, $(date)) ---" >> "$log_file"
         echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
 
         # Run one agent session
@@ -202,8 +194,8 @@ run_worker() {
             echo "$output" >> "$log_file"
         fi
 
-        # Check for rate-limit — keep task claimed, sleep, retry
-        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429"; then
+        # Check for rate-limit — keep task claimed, sleep, retry (does NOT count as an iteration)
+        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429 "; then
             local delay_idx=$(( rate_limit_attempts < ${#backoff_delays[@]} ? rate_limit_attempts : ${#backoff_delays[@]} - 1 ))
             local base_delay="${backoff_delays[$delay_idx]}"
             local jitter=$(( (RANDOM % 41) + 80 ))
@@ -214,7 +206,13 @@ run_worker() {
             continue
         fi
 
-        # Successful call — reset rate-limit backoff counter
+        # Successful call — count it and reset rate-limit backoff counter
+        iteration=$((iteration + 1))
+        if [[ $iteration -gt $max_iterations ]]; then
+            echo "Worker $agent_id: reached max iterations ($max_iterations)" >> "$log_file"
+            echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
+            exit 0
+        fi
         rate_limit_attempts=0
 
         # Check completion signals
