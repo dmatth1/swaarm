@@ -104,9 +104,7 @@ run_specialist() {
     prompt=$(sed -e "s|{{SPECIALIST_NAME}}|${specialist_name}|g" \
                  -e "s|{{SPECIALIST_NUM}}|${specialist_num}|g" \
                  /prompts/specialist.md)
-    # Inject role (may contain newlines and special chars — use a temp file)
-    local role_escaped
-    role_escaped=$(printf '%s\n' "$specialist_role" | sed 's/[[\.*^$()+?{|]/\\&/g')
+    # Inject role (may contain newlines and special chars — awk -v handles literal assignment)
     prompt=$(echo "$prompt" | awk -v role="$specialist_role" '{
         if ($0 ~ /\{\{SPECIALIST_ROLE\}\}/) {
             gsub(/\{\{SPECIALIST_ROLE\}\}/, "")
@@ -216,7 +214,7 @@ run_worker() {
         rate_limit_attempts=0
 
         # Check completion signals
-        if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|WORKER.*DONE"; then
+        if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|TASK_DONE"; then
             if [[ "${MULTI_ROUND:-false}" == "true" ]]; then
                 # In multi-round mode, harness kills workers — never self-exit on signals
                 sleep 2
