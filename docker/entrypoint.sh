@@ -51,6 +51,34 @@ run_orchestrator() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# REVIEWER MODE
+# ─────────────────────────────────────────────────────────────
+
+run_reviewer() {
+    local completed_task="${COMPLETED_TASK:-}"
+    local review_num="${REVIEW_NUM:-0}"
+    local log_file="/logs/reviewer-${review_num}.log"
+
+    echo "=== Reviewer ${review_num} started $(date) ===" > "$log_file"
+
+    # Clone bare repo
+    git clone /upstream /workspace -q 2>/dev/null
+    cd /workspace
+    git config user.email "reviewer@swarm"
+    git config user.name "Swarm Reviewer"
+
+    # Prepare prompt — substitute COMPLETED_TASK and REVIEW_NUM
+    local prompt
+    prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
+                 -e "s|{{REVIEW_NUM}}|${review_num}|g" \
+                 /prompts/reviewer.md)
+
+    echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1 || true
+
+    echo "=== Reviewer ${review_num} finished $(date) ===" >> "$log_file"
+}
+
+# ─────────────────────────────────────────────────────────────
 # WORKER MODE
 # ─────────────────────────────────────────────────────────────
 
@@ -143,8 +171,11 @@ case "$ROLE" in
     worker)
         run_worker "$@"
         ;;
+    reviewer)
+        run_reviewer
+        ;;
     *)
-        echo "Unknown role: $ROLE (expected orchestrator or worker)" >&2
+        echo "Unknown role: $ROLE (expected orchestrator, worker, or reviewer)" >&2
         exit 1
         ;;
 esac
