@@ -2,7 +2,7 @@
 
 Build software with a team of parallel Claude Code agents coordinating through a shared bare git repo. Give it a task, walk away, come back to finished code.
 
-Inspired by [Anthropic's multi-agent C compiler experiment](https://www.anthropic.com/engineering/building-c-compiler). Same coordination model, no Docker required.
+Inspired by [Anthropic's multi-agent C compiler experiment](https://www.anthropic.com/engineering/building-c-compiler). Same git-based coordination model.
 
 ## Requirements
 
@@ -10,7 +10,7 @@ Inspired by [Anthropic's multi-agent C compiler experiment](https://www.anthropi
 - `git`
 - `bash` (macOS or Linux)
 
-The Docker image is built automatically on first run (~2 min). It includes Claude Code CLI, Python, Node.js, Go, and common dev tools. Use `--no-docker` to run agents directly on the host (requires [Claude Code](https://claude.ai/code) installed locally).
+The Docker image is built automatically on first run (~2 min). It includes Claude Code CLI, Python, Node.js, Go, and common dev tools.
 
 ## Quick start
 
@@ -63,7 +63,7 @@ swarm closely matches Anthropic's original multi-agent architecture:
 
 **What swarm adds:** an explicit 3-state task machine (`tasks/pending/` → `tasks/active/` → `tasks/done/`) with numbered files, giving clearer progress visibility than the blog post's `current_tasks/` lock files.
 
-Use `--no-docker` if you prefer to run agents directly on the host without containers.
+**One difference from the blog post:** swarm workers are long-lived containers — each worker clones the repo once at startup and loops across multiple tasks rather than spawning a fresh container per task. Non-git state (installed packages, build artifacts) persists within a worker's `/workspace` across tasks, which is intentional — a setup task's installed dependencies are available to subsequent tasks on the same worker. All canonical project state lives in git regardless.
 
 ## Usage
 
@@ -74,7 +74,6 @@ Options:
   -n, --agents N    Number of parallel workers (default: 3)
   -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
   -v, --verbose     Stream agent output live to terminal
-  --no-docker       Run agents on host instead of Docker containers
   -h, --help        Show help
 ```
 
@@ -126,13 +125,10 @@ swarm-20240115-143022/
 │   ├── worker-1.log
 │   └── worker-2.log
 ├── pids/
-│   ├── orchestrator.pid
-│   ├── worker-1.pid
-│   └── worker-2.pid         ← cleaned up when worker exits
+│   ├── worker-1.cid         ← Docker container ID, cleaned up when worker exits
+│   └── worker-2.cid
 ├── repo.git/                ← Bare git repo (the coordination hub)
-├── orchestrator/            ← Orchestrator's working clone
-├── worker-1/                ← Worker 1's working clone
-└── worker-2/                ← Worker 2's working clone
+└── swarm.state              ← Persists task + agent count for resume
 ```
 
 ## Monitoring
@@ -153,7 +149,11 @@ tail -f swarm-*/logs/worker-1.log
 
 ## Resuming after interruption
 
-If a run stops mid-way (rate limit hit, crash, `Ctrl-C`, or a killed worker), use `resume` to pick up where it left off:
+**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter) while keeping their task claimed. When the limit resets, they resume automatically — no intervention needed. Their task stays in `tasks/active/` throughout.
+
+If you want to restart immediately after a rate limit clears rather than waiting for the backoff, use `resume`.
+
+If a run stops mid-way for other reasons (crash, `Ctrl-C`, killed worker), use `resume` to pick up where it left off:
 
 ```bash
 ./swarm resume ./swarm-20240115-143022

@@ -22,8 +22,8 @@ swarm-TIMESTAMP/
     tasks/pending|active|done/
     [project files]
   logs/orchestrator.log, worker-N.log
-  pids/                  ← .pid (bare-metal) or .cid (docker) files
-  orchestrator/ worker-N/ ← Local git clones
+  pids/                  ← .cid files tracking running worker containers
+  swarm.state            ← Persists SWARM_TASK and SWARM_AGENTS for resume
 ```
 
 ## How It Works
@@ -69,23 +69,24 @@ swarm-TIMESTAMP/
 
 ## Docker Execution
 
-Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo.git` → `/upstream` (rw), `logs/` → `/logs` (rw), `prompts/` → `/prompts` (ro). Auth is injected via `CLAUDE_CODE_OAUTH_TOKEN` env var (extracted from macOS Keychain at container launch). Worker clones `/upstream` into `/workspace` on startup.
+Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo.git` → `/upstream` (rw), `logs/` → `/logs` (rw), `prompts/` → `/prompts` (ro). Auth is injected via `CLAUDE_CODE_OAUTH_TOKEN` env var (extracted from macOS Keychain on macOS, or `~/.claude/credentials.json` on Linux).
 
-- Orchestrator: `docker run --rm` (foreground)
+- Orchestrator: `docker run --rm` (foreground, exits when done)
 - Workers: `docker run -d`, tracked via `pids/worker-N.cid`
-- `--no-docker`: agents run as local processes, clones in `worker-N/` dirs
+
+**Worker container lifecycle**: each worker container is long-lived — it clones `/upstream` into `/workspace` once at startup, then loops: pull → claim task → run claude → complete → repeat. The container persists across multiple tasks. Non-git state (installed packages, build artifacts) accumulates in `/workspace` across tasks on the same worker; this is intentional as later tasks typically depend on setup done by earlier ones. All canonical project state is in git.
 
 ## Key Design Decisions
 
 - **Stateless invocations**: agents re-read `SPEC.md` and task queue every call; state is only in git
-- **`env -u CLAUDECODE`**: required for bare-metal to allow nested `claude` calls
 - **`.gitkeep` files**: keeps `tasks/active/` and `tasks/done/` tracked by git when empty
 - **`set -euo pipefail`**: use `var=$((var + 1))` not `((var++))`, use `if`/`then` not `[[ ]] && cmd`
+- **Rate-limit backoff**: workers detect rate-limit output from claude and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`
 
 ## Subcommands
 
 ```bash
-./swarm "<task>" [--agents N] [--output DIR] [--verbose] [--no-docker]
+./swarm "<task>" [--agents N] [--output DIR] [--verbose]
 ./swarm status <output-dir>
 ./swarm kill <output-dir> [agent-id]
 ./swarm resume <output-dir> [-n N]   # unsticks active tasks, re-spawns workers
@@ -101,7 +102,8 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 | Task stuck in `active/` | Worker crashed | `./swarm resume` |
 | Orchestrator creates 0 tasks | Prompt not followed | Check `logs/orchestrator.log` |
 | `((failed++))` exits silently | `set -e` + arithmetic 0 | `((failed++)) \|\| true` |
-| Container exits immediately | Auth failed | Verify `Claude Code-credentials` exists in macOS Keychain |
+| Container exits immediately | Auth failed | Verify `Claude Code-credentials` in macOS Keychain or `~/.claude/credentials.json` on Linux |
+| Workers sleeping, no progress | Rate limit hit | Automatic — workers back off and retry; or `./swarm resume` to restart manually |
 | Orphaned containers | EXIT trap missed | `docker ps -a --filter name=swarm-` |
 
 ## Testing and Development Cleanup
