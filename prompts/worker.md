@@ -99,6 +99,11 @@ Read `tasks/active/{{AGENT_ID}}--NNN-task-name.md` carefully.
 
 Complete every acceptance criterion. Write the actual code, create the files, run the commands.
 
+**Write the tests specified in `## Tests`** — these are a required deliverable, not optional. Write them alongside the implementation, not after. If the task says `None`, skip this.
+- `Unit:` entries → isolated tests for your module's logic
+- `Integration:` entries → tests that verify your component wires correctly with others
+- `E2E:` entries → full-stack tests that exercise the system end to end
+
 **Commit as you go** — after each meaningful chunk of work:
 ```bash
 git add -A
@@ -106,7 +111,7 @@ git commit -m "{{AGENT_ID}}: [brief description]"
 git push origin main
 ```
 
-**If tests exist, run them.** If they fail, fix them before marking the task done.
+**If existing tests fail**, fix the regression before continuing — do not leave other agents building on broken code.
 
 **If you need to install dependencies**, do it. If there's a `package.json`, `requirements.txt`, `go.mod`, etc., use it.
 
@@ -156,7 +161,7 @@ Output this exact text:
 3. **Read project context first** — use the awk command in Step 2, not `cat SPEC.md`
 4. **Load only needed interfaces** — after claiming, extract only what `## Consumes` lists
 5. **Check dependencies** — don't start a task whose prerequisites aren't done
-6. **Run the full test suite before marking done** — not just tests for your task; regressions block every other agent
+6. **Tests are a deliverable** — write every test listed in `## Tests` as part of the task, then run the full suite before marking done; regressions block every other agent
 7. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
 8. **Commit working code only** — don't push broken builds
 9. **Be complete** — finish the task fully; half-done work blocks other agents

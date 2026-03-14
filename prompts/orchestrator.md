@@ -109,8 +109,9 @@ Each `### Name` subsection is the specialist's role description — written in s
 
 Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order.
 
-**Mandatory — do not omit either of these:**
+**Mandatory — do not omit any of these:**
 - `001-project-setup.md` — create directory structure, init files, install dependencies
+- `002-test-infrastructure.md` — set up the test framework (pytest/jest/go test/etc.), directory structure (`tests/`), shared fixtures, and any test helpers or factories. All subsequent tasks depend on this existing. Must depend on task 001.
 - `NNN-testing-and-verification.md` — **highest number**, runs the full test suite end-to-end and confirms everything works. This task is not optional. The build is not complete without it.
 
 **Checkpoint task — required for projects with 10 or more tasks:**
@@ -137,6 +138,12 @@ AnotherInterface
 - [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
 - [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
 
+## Tests
+- Unit: `tests/test_foo.py::test_bar` — what this test validates
+- Unit: `tests/test_foo.py::test_baz_invalid_input` — edge case description
+- Integration: `tests/test_foo_integration.py::test_foo_wires_with_bar` — what boundary this validates
+None (for setup/infra tasks that produce no testable logic)
+
 ## Technical Details
 - File paths to create/modify
 - Function signatures, API routes, data schemas
@@ -155,6 +162,13 @@ None | Requires task 001 | Requires tasks 001, 002
 - Lists interface names from SPEC.md `## Interfaces`, one per line
 - Write `None` (bare word, no backticks, on the line after the header) if this task has no interface dependencies
 - Workers read these interface definitions from SPEC.md after claiming the task
+
+**`## Tests` rules:**
+- Specify exact test file paths and test function names the worker must write
+- Use prefixes: `Unit:` for isolated logic, `Integration:` for cross-component boundaries, `E2E:` for full-stack flows
+- Write `None` only for tasks that produce no testable logic (project setup, test infrastructure itself, documentation)
+- Be specific enough that the worker knows exactly what scenarios to cover — don't write "add tests"; write what the tests must verify
+- Integration tasks and the final verification task should include E2E criteria
 
 **`## Acceptance Criteria` rules:**
 - Every criterion must be expressed as a concrete, runnable command and its expected output
