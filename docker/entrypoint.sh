@@ -124,6 +124,11 @@ run_worker() {
         # If no work for this agent
         if [[ "$pending" -eq 0 && "$own_active" -eq 0 ]]; then
             if [[ "$all_active" -eq 0 ]]; then
+                if [[ "${MULTI_ROUND:-false}" == "true" ]]; then
+                    # In multi-round mode, reviewer may add tasks — sleep and wait
+                    sleep 15
+                    continue
+                fi
                 echo "Worker $agent_id: all tasks complete" >> "$log_file"
                 echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
                 exit 0
@@ -148,6 +153,11 @@ run_worker() {
 
         # Check completion signals
         if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|WORKER.*DONE"; then
+            if [[ "${MULTI_ROUND:-false}" == "true" ]]; then
+                # In multi-round mode, harness kills workers — never self-exit on signals
+                sleep 2
+                continue
+            fi
             echo "Worker $agent_id: signaled completion" >> "$log_file"
             echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
             exit 0
