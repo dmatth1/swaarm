@@ -14,7 +14,7 @@ You are working in a git repository shared by multiple agents running in paralle
 tasks/pending/   ← unclaimed tasks (pick from here)
 tasks/active/    ← tasks being worked on (yours will be here while working)
 tasks/done/      ← completed tasks
-SPEC.md          ← full project specification (read this first!)
+SPEC.md          ← project specification
 PROGRESS.md      ← overall progress
 ```
 
@@ -29,9 +29,13 @@ Always start with:
 git pull origin main
 ```
 
-### Step 2: Read the Spec
+### Step 2: Read Project Context
 
-Read `SPEC.md` to understand the overall project before doing anything else.
+Read the architecture, stack, file layout, and key decisions from SPEC.md — but **not** the `## Interfaces` section (which is large and loaded on demand):
+
+```bash
+awk '/^## Interfaces/{exit} {print}' SPEC.md
+```
 
 ### Step 3: Check for Available Tasks
 
@@ -45,7 +49,7 @@ ls tasks/pending/
 
 ### Step 4: Check Dependencies
 
-Before claiming a task, check if it has dependencies. Read the task file quickly:
+Before claiming a task, read the task file to check its `## Dependencies` section:
 ```bash
 cat tasks/pending/NNN-task-name.md
 ```
@@ -69,7 +73,27 @@ git pull origin main
 # Choose a different task and try again from Step 3
 ```
 
-### Step 6: Do the Work
+### Step 6: Load Interface Context
+
+After a successful claim, enumerate the interfaces your task consumes:
+
+```bash
+awk '/^## Consumes/{found=1; next} found && /^## /{exit} found && NF{print}' \
+  tasks/active/{{AGENT_ID}}--NNN-task-name.md
+```
+
+- If the output is empty or `None`: skip to Step 7 — no interface context needed.
+- Otherwise, for each interface name in the output, extract its definition from SPEC.md:
+
+```bash
+awk '/^### InterfaceName$/{found=1; next} found && /^### /{exit} found{print}' SPEC.md
+```
+
+(Replace `InterfaceName` with the actual name. Run once per listed interface.)
+
+Read each extracted definition carefully — this is the contract you must implement against.
+
+### Step 7: Do the Work
 
 Read `tasks/active/{{AGENT_ID}}--NNN-task-name.md` carefully.
 
@@ -86,7 +110,7 @@ git push origin main
 
 **If you need to install dependencies**, do it. If there's a `package.json`, `requirements.txt`, `go.mod`, etc., use it.
 
-### Step 7: Mark Task Complete
+### Step 8: Mark Task Complete
 
 When all acceptance criteria are met:
 ```bash
@@ -96,7 +120,7 @@ git commit -m "{{AGENT_ID}}: complete task NNN - [one-line summary of what was b
 git push origin main
 ```
 
-### Step 8: Signal Done
+### Step 9: Signal Done
 
 Output this exact text:
 
@@ -108,12 +132,13 @@ Output this exact text:
 
 1. **Always `git pull` before starting** — prevents conflicts
 2. **Push your claim immediately** — locks the task so others don't grab it
-3. **Read SPEC.md** — understand the full picture before writing any code
-4. **Check dependencies** — don't start a task whose prerequisites aren't done
-5. **Test your work** — run tests if they exist; create simple tests if they don't
-6. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
-7. **Commit working code only** — don't push broken builds
-8. **Be complete** — finish the task fully; half-done work blocks other agents
+3. **Read project context first** — use the awk command in Step 2, not `cat SPEC.md`
+4. **Load only needed interfaces** — after claiming, extract only what `## Consumes` lists
+5. **Check dependencies** — don't start a task whose prerequisites aren't done
+6. **Test your work** — run tests if they exist; create simple tests if they don't
+7. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
+8. **Commit working code only** — don't push broken builds
+9. **Be complete** — finish the task fully; half-done work blocks other agents
 
 ---
 
