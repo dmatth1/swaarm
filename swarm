@@ -679,8 +679,9 @@ run_with_review() {
                         all_complete=true
                     fi
                 fi
-            elif [[ "$p_count" -gt 0 && "$a_count" -eq 0 ]]; then
+            elif [[ "$p_count" -gt 0 && "$a_count" -eq 0 && "$(done_count)" -gt 0 ]]; then
                 # Pending tasks exist but no worker is active — potential deadlock
+                # (only after ≥1 task done, to avoid false positives during worker startup)
                 stuck_cycles=$((stuck_cycles + 1))
                 if [[ "$stuck_cycles" -ge "$max_stuck_cycles" ]]; then
                     review_count=$((review_count + 1))
