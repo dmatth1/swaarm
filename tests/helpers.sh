@@ -142,7 +142,6 @@ load_swarm() {
     REPO_DIR="$_repo"
     MAIN_DIR="$_main"
     LOGS_DIR="$_logs"
-    USE_DOCKER=true
     VERBOSE=false
     MAX_WORKER_ITERATIONS=100
     DOCKER_IMAGE="swarm-agent"

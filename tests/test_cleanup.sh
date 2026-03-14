@@ -115,4 +115,19 @@ assert_eq "" "$output" "no warning when nothing running"
 teardown_test
 trap - EXIT
 
+# ─── Test 5: --no-docker flag produces "Unknown option" error ─────────────────
+
+setup_test "no-docker: --no-docker flag produces unknown option error"
+trap teardown_test EXIT
+
+exit_code=0
+output=$(bash "$SWARM_SCRIPT" --no-docker "test task" 2>&1) || exit_code=$?
+[[ "$exit_code" -ne 0 ]] \
+    && pass "--no-docker exits non-zero" \
+    || fail "--no-docker should exit non-zero"
+assert_output_contains "$output" "Unknown option" "--no-docker prints Unknown option error"
+
+teardown_test
+trap - EXIT
+
 print_summary

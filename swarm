@@ -27,7 +27,6 @@ OUTPUT_DIR=""
 TASK=""
 VERBOSE=false
 MAX_WORKER_ITERATIONS=100
-USE_DOCKER=true
 DOCKER_IMAGE="swarm-agent"
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
@@ -46,7 +45,6 @@ Options:
   -n, --agents N        Number of parallel worker agents (default: 3)
   -o, --output DIR      Output directory (default: ./swarm-TIMESTAMP)
   -v, --verbose         Show agent output in real-time
-  --no-docker           Run agents on host instead of in Docker containers
   --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   -h, --help            Show this help
@@ -120,7 +118,6 @@ cmd_status() {
         fi
         local wstatus=""
         local cid_file="$pids_dir/worker-${worker_num}.cid"
-        local pid_file="$pids_dir/worker-${worker_num}.pid"
         if [[ -f "$cid_file" ]]; then
             local wcname
             wcname=$(cat "$cid_file" 2>/dev/null || echo "")
@@ -128,14 +125,6 @@ cmd_status() {
                 wstatus="${GREEN}RUNNING (container)${NC}"
             else
                 wstatus="${YELLOW}STOPPED${NC}"
-            fi
-        elif [[ -f "$pid_file" ]]; then
-            local wpid
-            wpid=$(cat "$pid_file" 2>/dev/null || echo "")
-            if [[ -n "$wpid" ]] && kill -0 "$wpid" 2>/dev/null; then
-                wstatus="${GREEN}RUNNING (pid $wpid)${NC}"
-            else
-                wstatus="${YELLOW}STALE PID${NC}"
             fi
         elif grep -q "DONE at" "$wlog" 2>/dev/null; then
             wstatus="${GREEN}DONE${NC}"
@@ -202,9 +191,8 @@ cmd_kill() {
     fi
 
     if [[ -n "$target" ]]; then
-        # Kill specific target — try container first, then PID
+        # Kill specific target — container only
         local cid_file="$pids_dir/${target}.cid"
-        local pid_file="$pids_dir/${target}.pid"
         if [[ -f "$cid_file" ]]; then
             local cname
             cname=$(cat "$cid_file" 2>/dev/null || echo "")
@@ -213,17 +201,6 @@ cmd_kill() {
                 docker rm "$cname" 2>/dev/null || true
                 rm -f "$cid_file"
                 success "Stopped $target (container $cname)"
-            fi
-        elif [[ -f "$pid_file" ]]; then
-            local pid
-            pid=$(cat "$pid_file" 2>/dev/null || echo "")
-            if [[ -n "$pid" ]]; then
-                kill "$pid" 2>/dev/null || true
-                rm -f "$pid_file"
-                success "Killed $target (pid $pid)"
-            else
-                warn "PID file empty for $target"
-                rm -f "$pid_file"
             fi
         else
             error "No tracking file found for: $target"
@@ -242,19 +219,6 @@ cmd_kill() {
                     success "Stopped $name (container $cname)"
                 fi
                 rm -f "$cid_file"
-            fi
-        done
-        # Kill all — PIDs
-        local pid_file pid
-        for pid_file in "$pids_dir"/*.pid; do
-            if [[ -f "$pid_file" ]]; then
-                name=$(basename "$pid_file" .pid)
-                pid=$(cat "$pid_file" 2>/dev/null || echo "")
-                if [[ -n "$pid" ]]; then
-                    kill "$pid" 2>/dev/null || true
-                    success "Killed $name (pid $pid)"
-                fi
-                rm -f "$pid_file"
             fi
         done
     fi
@@ -309,10 +273,9 @@ cmd_resume() {
     fi
 
     # shellcheck source=/dev/null
-    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS, SWARM_DOCKER, SWARM_MULTI_ROUND
+    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS (SWARM_DOCKER/SWARM_MULTI_ROUND ignored if present in old state files)
 
     local agents="${override_agents:-$SWARM_AGENTS}"
-    USE_DOCKER="${SWARM_DOCKER:-true}"
 
     OUTPUT_DIR="$(cd "$output_dir" && pwd)"
     REPO_DIR="$OUTPUT_DIR/repo.git"
@@ -365,59 +328,21 @@ cmd_resume() {
     pending=$(find "$MAIN_DIR/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     done_n=$(find "$MAIN_DIR/tasks/done" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
-    if [[ "$pending" -eq 0 && "${SWARM_MULTI_ROUND:-false}" != "true" ]]; then
-        success "Nothing to resume — all tasks already complete ($done_n done)"
-        info "Project files: $MAIN_DIR/"
-        exit 0
-    fi
-
     success "$pending task(s) pending, $done_n done — spawning $agents worker(s)"
     echo
 
     # Pre-flight specialist sweep before re-spawning workers
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        _g_specialist_count=0
-        run_specialist_sweep "pre-flight-resume"
-        sync_main
-        echo
-    fi
+    _g_specialist_count=0
+    run_specialist_sweep "pre-flight-resume"
+    sync_main
+    echo
 
     # Spawn workers
     local failed=0
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        RUN_ID="$(basename "$OUTPUT_DIR")"
-        ensure_docker_image
-        trap cleanup_docker EXIT
-        if [[ "${SWARM_MULTI_ROUND:-false}" == "true" ]]; then
-            run_with_review "$agents"
-        else
-            for i in $(seq 1 "$agents"); do
-                docker_run_worker "$i"
-                sleep 1
-            done
-            monitor_progress &
-            local monitor_pid=$!
-            failed=$(docker_wait_workers "$agents")
-            kill "$monitor_pid" 2>/dev/null || true
-        fi
-    else
-        # Remove old worker dirs so run_worker clones fresh
-        for i in $(seq 1 "$agents"); do
-            rm -rf "$OUTPUT_DIR/worker-$i"
-        done
-        local pids=()
-        for i in $(seq 1 "$agents"); do
-            run_worker "$i" &
-            pids+=($!)
-            sleep 1
-        done
-        monitor_progress &
-        local monitor_pid=$!
-        for pid in "${pids[@]}"; do
-            wait "$pid" || { ((failed++)) || true; }
-        done
-        kill "$monitor_pid" 2>/dev/null || true
-    fi
+    RUN_ID="$(basename "$OUTPUT_DIR")"
+    ensure_docker_image
+    trap cleanup_docker EXIT
+    run_with_review "$agents"
 
     # Final sync
     (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
@@ -465,7 +390,6 @@ case "${1:-}" in
         while [[ $# -gt 0 ]]; do
             case $1 in
                 -n|--agents) override_agents="$2"; shift 2 ;;
-                --no-docker) USE_DOCKER=false; shift ;;
                 *) shift ;;
             esac
         done
@@ -484,7 +408,6 @@ while [[ $# -gt 0 ]]; do
         -n|--agents)        NUM_AGENTS="$2"; shift 2 ;;
         -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
         -v|--verbose)       VERBOSE=true; shift ;;
-        --no-docker)        USE_DOCKER=false; shift ;;
         --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         -h|--help)      usage; exit 0 ;;
@@ -510,10 +433,17 @@ fi # end BASH_SOURCE guard for argument parsing
 # ─────────────────────────────────────────────────────────────
 
 get_claude_oauth_token() {
-    # Extract OAuth access token from macOS Keychain for injection into Docker containers
+    # Extract OAuth access token for injection into Docker containers
     local creds
-    creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
-    # Parse the accessToken field from the JSON credential
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS: read from Keychain
+        creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
+    else
+        # Linux: read from ~/.claude/credentials.json
+        local creds_file="$HOME/.claude/credentials.json"
+        [[ -f "$creds_file" ]] || return 1
+        creds=$(cat "$creds_file")
+    fi
     echo "$creds" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['claudeAiOauth']['accessToken'])" 2>/dev/null
 }
 
@@ -968,7 +898,7 @@ run_with_review() {
 }
 
 cleanup_docker() {
-    if [[ "$USE_DOCKER" == "true" && -n "$RUN_ID" ]]; then
+    if [[ -n "$RUN_ID" ]]; then
         docker ps -q --filter "name=swarm-${RUN_ID}-" 2>/dev/null | xargs -r docker stop 2>/dev/null || true
         docker ps -aq --filter "name=swarm-${RUN_ID}-" 2>/dev/null | xargs -r docker rm 2>/dev/null || true
     fi
@@ -977,21 +907,6 @@ cleanup_docker() {
 # ─────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────
-
-# Run claude non-interactively in a given directory with a prompt file
-# Uses stdin piping to handle large prompts safely
-claude_run() {
-    local dir="$1"
-    local prompt_file="$2"
-    local log_file="${3:-/dev/stderr}"
-
-    if [[ "$VERBOSE" == "true" ]]; then
-        (cd "$dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee -a "$log_file"
-    else
-        (cd "$dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) >> "$log_file" 2>&1
-        cat "$log_file"
-    fi
-}
 
 # Count .md files in a dir (safe: returns 0 when empty or missing)
 count_files() {
@@ -1068,151 +983,6 @@ PROGEOF
 }
 
 # ─────────────────────────────────────────────────────────────
-# ORCHESTRATOR
-# ─────────────────────────────────────────────────────────────
-
-run_orchestrator() {
-    log "Starting orchestrator agent..."
-
-    # Write PID so we can be killed externally
-    mkdir -p "$OUTPUT_DIR/pids"
-    echo $$ > "$OUTPUT_DIR/pids/orchestrator.pid"
-
-    local orch_dir="$OUTPUT_DIR/orchestrator"
-    git clone "$REPO_DIR" "$orch_dir" -q 2>/dev/null
-
-    (
-        cd "$orch_dir"
-        git config user.email "orchestrator@swarm"
-        git config user.name "Swarm Orchestrator"
-    )
-
-    # Inject task into prompt
-    local prompt_file="$LOGS_DIR/orchestrator-prompt.md"
-    sed "s|{{TASK}}|$TASK|g" "$PROMPTS_DIR/orchestrator.md" > "$prompt_file"
-
-    local log_file="$LOGS_DIR/orchestrator.log"
-
-    log "Orchestrator analyzing task and creating subtasks..."
-
-    # Run orchestrator (unset CLAUDECODE to allow nested Claude sessions)
-    if [[ "$VERBOSE" == "true" ]]; then
-        (cd "$orch_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee "$log_file" || true
-    else
-        (cd "$orch_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) > "$log_file" 2>&1 || true
-    fi
-
-    # Sync to see what was created
-    sync_main
-
-    local tasks
-    tasks=$(pending_count)
-
-    if [[ "$tasks" -gt 0 ]]; then
-        success "Orchestrator created $tasks tasks"
-        if [[ "$VERBOSE" == "true" ]]; then
-            log "Tasks:"
-            ls "$MAIN_DIR/tasks/pending/" | sed 's/^/    /'
-        fi
-        return 0
-    else
-        error "Orchestrator failed to create tasks. Check: $log_file"
-        if grep -qi "error\|failed\|exception" "$log_file" 2>/dev/null; then
-            tail -20 "$log_file" >&2
-        fi
-        return 1
-    fi
-}
-
-# ─────────────────────────────────────────────────────────────
-# WORKER
-# ─────────────────────────────────────────────────────────────
-
-run_worker() {
-    local agent_id="$1"
-    local worker_dir="$OUTPUT_DIR/worker-$agent_id"
-    local log_file="$LOGS_DIR/worker-$agent_id.log"
-    local prompt_file="$LOGS_DIR/worker-$agent_id-prompt.md"
-    local pid_file="$OUTPUT_DIR/pids/worker-$agent_id.pid"
-
-    # Write PID so we can be killed externally; clean up on exit
-    mkdir -p "$OUTPUT_DIR/pids"
-    echo $$ > "$pid_file"
-    trap 'rm -f "$pid_file"' EXIT
-
-    git clone "$REPO_DIR" "$worker_dir" -q 2>/dev/null
-
-    (
-        cd "$worker_dir"
-        git config user.email "worker-$agent_id@swarm"
-        git config user.name "Swarm Worker $agent_id"
-    )
-
-    # Inject agent ID into prompt
-    sed "s|{{AGENT_ID}}|worker-$agent_id|g" "$PROMPTS_DIR/worker.md" > "$prompt_file"
-
-    echo "=== Worker $agent_id started $(date) ===" > "$log_file"
-
-    local iteration=0
-
-    while true; do
-        # Pull latest state
-        (cd "$worker_dir" && git pull origin main -q 2>/dev/null) || true
-
-        # Count work available
-        local pending own_active all_active
-        pending=$(count_files "$worker_dir/tasks/pending")
-        own_active=$(find "$worker_dir/tasks/active/" -maxdepth 1 -name "worker-$agent_id--*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-        all_active=$(count_files "$worker_dir/tasks/active")
-
-        # If no work for this agent — waits don't count against the iteration limit
-        if [[ "$pending" -eq 0 && "$own_active" -eq 0 ]]; then
-            if [[ "$all_active" -eq 0 ]]; then
-                success "Worker $agent_id: all tasks complete"
-                echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
-                return 0
-            else
-                # Other workers still active, wait
-                if [[ "$VERBOSE" == "true" ]]; then log "Worker $agent_id: waiting (others still active: $all_active)"; fi
-                sleep 5
-                continue
-            fi
-        fi
-
-        # Only count iterations where we actually invoke Claude
-        iteration=$((iteration + 1))
-        if [[ $iteration -gt $MAX_WORKER_ITERATIONS ]]; then
-            warn "Worker $agent_id: reached max iterations ($MAX_WORKER_ITERATIONS)"
-            echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
-            return 0
-        fi
-
-        if [[ "$VERBOSE" == "true" ]]; then log "Worker $agent_id: iteration $iteration (pending=$pending, own_active=$own_active)"; fi
-
-        echo -e "\n--- Worker $agent_id Iteration $iteration ($(date)) ---" >> "$log_file"
-        echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
-
-        # Run one agent session (claims and completes one task)
-        local output exit_code
-        if [[ "$VERBOSE" == "true" ]]; then
-            output=$( (cd "$worker_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 | tee -a "$log_file" ) || true
-        else
-            output=$( (cd "$worker_dir" && cat "$prompt_file" | env -u CLAUDECODE claude --dangerously-skip-permissions -p) 2>&1 ) || true
-            echo "$output" >> "$log_file"
-        fi
-
-        # Check completion signals
-        if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|WORKER.*DONE"; then
-            success "Worker $agent_id: signaled completion"
-            echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
-            return 0
-        fi
-
-        sleep 2
-    done
-}
-
-# ─────────────────────────────────────────────────────────────
 # PROGRESS MONITOR (background)
 # ─────────────────────────────────────────────────────────────
 
@@ -1243,11 +1013,6 @@ main() {
     info "Task:   $TASK"
     info "Agents: $NUM_AGENTS"
     info "Output: $OUTPUT_DIR"
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        info "Mode:   Docker"
-    else
-        info "Mode:   bare-metal (--no-docker)"
-    fi
     echo
 
     # Check prerequisites
@@ -1256,26 +1021,16 @@ main() {
         exit 1
     fi
 
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        if ! command -v docker &>/dev/null; then
-            error "Docker not found. Install Docker or use --no-docker."
-            exit 1
-        fi
-    else
-        if ! command -v claude &>/dev/null; then
-            error "Claude Code CLI not found."
-            info "Install from: https://claude.ai/code"
-            exit 1
-        fi
+    if ! command -v docker &>/dev/null; then
+        error "Docker not found. Install Docker."
+        exit 1
     fi
 
     # Warn about running containers from prior swarm runs
-    if [[ "$USE_DOCKER" == "true" ]] && command -v docker &>/dev/null; then
-        local prior_count
-        prior_count=$(docker ps -q --filter "name=swarm-" 2>/dev/null | wc -l | tr -d ' ') || prior_count=0
-        if [[ "$prior_count" -gt 0 ]]; then
-            warn "$prior_count swarm container(s) from a prior run are still running — run './swarm cleanup' to stop them"
-        fi
+    local prior_count
+    prior_count=$(docker ps -q --filter "name=swarm-" 2>/dev/null | wc -l | tr -d ' ') || prior_count=0
+    if [[ "$prior_count" -gt 0 ]]; then
+        warn "$prior_count swarm container(s) from a prior run are still running — run './swarm cleanup' to stop them"
     fi
 
     RUN_ID="$(basename "$OUTPUT_DIR")"
@@ -1285,66 +1040,35 @@ main() {
     echo
 
     # Write state file so 'swarm resume' can restart this run
-    local swarm_multi_round="false"
-    if [[ "$USE_DOCKER" == "true" ]]; then swarm_multi_round="true"; fi
     {
         printf 'SWARM_TASK=%q\n' "$TASK"
         printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
-        printf 'SWARM_DOCKER=%s\n' "$USE_DOCKER"
-        printf 'SWARM_MULTI_ROUND=%s\n' "$swarm_multi_round"
         printf 'SWARM_STARTED="%s"\n' "$(date)"
     } > "$OUTPUT_DIR/swarm.state"
 
     # Build Docker image if needed
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        ensure_docker_image
-        trap cleanup_docker EXIT
-        echo
-    fi
+    ensure_docker_image
+    trap cleanup_docker EXIT
+    echo
 
     # Step 2: Run orchestrator
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        if ! docker_run_orchestrator; then
-            error "Orchestration failed."
-            exit 1
-        fi
-    else
-        if ! run_orchestrator; then
-            error "Orchestration failed."
-            exit 1
-        fi
+    if ! docker_run_orchestrator; then
+        error "Orchestration failed."
+        exit 1
     fi
     echo
 
     # Step 3: Pre-flight specialist sweep — review task breakdown before workers start
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        _g_specialist_count=0
-        run_specialist_sweep "pre-flight"
-        sync_main
-        echo
-    fi
+    _g_specialist_count=0
+    run_specialist_sweep "pre-flight"
+    sync_main
+    echo
 
     # Step 4: Spawn workers in parallel
     log "Spawning $NUM_AGENTS worker agents..."
     echo
 
-    local failed=0
-    if [[ "$USE_DOCKER" == "true" ]]; then
-        run_with_review "$NUM_AGENTS"
-    else
-        local pids=()
-        for i in $(seq 1 "$NUM_AGENTS"); do
-            run_worker "$i" &
-            pids+=($!)
-            sleep 1
-        done
-        monitor_progress &
-        local monitor_pid=$!
-        for pid in "${pids[@]}"; do
-            wait "$pid" || { ((failed++)) || true; }
-        done
-        kill "$monitor_pid" 2>/dev/null || true
-    fi
+    run_with_review "$NUM_AGENTS"
 
     # Final sync
     sync_main 2>/dev/null || true
