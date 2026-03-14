@@ -364,70 +364,6 @@ cmd_resume() {
 }
 
 # ─────────────────────────────────────────────────────────────
-# PARSE ARGUMENTS  (guarded so script can be sourced for testing)
-# ─────────────────────────────────────────────────────────────
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-
-# Check for subcommands first
-case "${1:-}" in
-    status)
-        shift
-        cmd_status "${1:-}"
-        exit 0
-        ;;
-    kill)
-        shift
-        cmd_kill "${1:-}" "${2:-}"
-        exit 0
-        ;;
-    resume)
-        shift
-        output_dir="${1:-}"
-        override_agents=""
-        shift 2>/dev/null || true
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                -n|--agents) override_agents="$2"; shift 2 ;;
-                *) shift ;;
-            esac
-        done
-        cmd_resume "$output_dir" "$override_agents"
-        exit 0
-        ;;
-    cleanup)
-        shift
-        cmd_cleanup "${1:-}"
-        exit 0
-        ;;
-esac
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--agents)        NUM_AGENTS="$2"; shift 2 ;;
-        -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
-        -v|--verbose)       VERBOSE=true; shift ;;
-        --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
-        --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
-        -h|--help)      usage; exit 0 ;;
-        -*)             error "Unknown option: $1"; usage; exit 1 ;;
-        *)              TASK="${TASK:+$TASK }$1"; shift ;;
-    esac
-done
-
-[[ -z "$TASK" ]] && { error "No task specified."; echo; usage; exit 1; }
-[[ -z "$OUTPUT_DIR" ]] && OUTPUT_DIR="./swarm-$(date +%Y%m%d-%H%M%S)"
-
-# Resolve to absolute path
-OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_DIR")" 2>/dev/null && pwd)/$(basename "$OUTPUT_DIR")" || OUTPUT_DIR="$(pwd)/$(basename "$OUTPUT_DIR")"
-
-REPO_DIR="$OUTPUT_DIR/repo.git"
-LOGS_DIR="$OUTPUT_DIR/logs"
-MAIN_DIR="$OUTPUT_DIR/main"
-
-fi # end BASH_SOURCE guard for argument parsing
-
-# ─────────────────────────────────────────────────────────────
 # DOCKER HELPERS
 # ─────────────────────────────────────────────────────────────
 
@@ -619,28 +555,6 @@ run_specialist_sweep() {
         docker_run_specialist "$sname" "$srole" "$_g_specialist_count"
         sync_main
     done <<< "$spec_names"
-}
-
-docker_wait_workers() {
-    local agents="$1"
-    local failed=0
-    for i in $(seq 1 "$agents"); do
-        local container_name="swarm-${RUN_ID}-worker-${i}"
-        local exit_code
-        exit_code=$(docker wait "$container_name" 2>/dev/null) || exit_code=1
-        if [[ "$exit_code" -ne 0 ]]; then
-            ((failed++)) || true
-        fi
-        # Log final status
-        local log_file="$LOGS_DIR/worker-$i.log"
-        if [[ -f "$log_file" ]] && grep -q "DONE at" "$log_file" 2>/dev/null; then
-            success "Worker $i: completed" >&2
-        fi
-        # Cleanup stopped container
-        docker rm "$container_name" >/dev/null 2>&1 || true
-        rm -f "$OUTPUT_DIR/pids/worker-${i}.cid" 2>/dev/null || true
-    done
-    echo "$failed"
 }
 
 check_and_respawn_dead_workers() {
@@ -1105,5 +1019,69 @@ main() {
     success "Swarm complete! 🐝"
     echo
 }
+
+# ─────────────────────────────────────────────────────────────
+# PARSE ARGUMENTS  (guarded so script can be sourced for testing)
+# ─────────────────────────────────────────────────────────────
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+
+# Check for subcommands first
+case "${1:-}" in
+    status)
+        shift
+        cmd_status "${1:-}"
+        exit 0
+        ;;
+    kill)
+        shift
+        cmd_kill "${1:-}" "${2:-}"
+        exit 0
+        ;;
+    resume)
+        shift
+        output_dir="${1:-}"
+        override_agents=""
+        shift 2>/dev/null || true
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                -n|--agents) override_agents="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        cmd_resume "$output_dir" "$override_agents"
+        exit 0
+        ;;
+    cleanup)
+        shift
+        cmd_cleanup "${1:-}"
+        exit 0
+        ;;
+esac
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -n|--agents)        NUM_AGENTS="$2"; shift 2 ;;
+        -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
+        -v|--verbose)       VERBOSE=true; shift ;;
+        --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
+        --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
+        -h|--help)      usage; exit 0 ;;
+        -*)             error "Unknown option: $1"; usage; exit 1 ;;
+        *)              TASK="${TASK:+$TASK }$1"; shift ;;
+    esac
+done
+
+[[ -z "$TASK" ]] && { error "No task specified."; echo; usage; exit 1; }
+[[ -z "$OUTPUT_DIR" ]] && OUTPUT_DIR="./swarm-$(date +%Y%m%d-%H%M%S)"
+
+# Resolve to absolute path
+OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_DIR")" 2>/dev/null && pwd)/$(basename "$OUTPUT_DIR")" || OUTPUT_DIR="$(pwd)/$(basename "$OUTPUT_DIR")"
+
+REPO_DIR="$OUTPUT_DIR/repo.git"
+LOGS_DIR="$OUTPUT_DIR/logs"
+MAIN_DIR="$OUTPUT_DIR/main"
+
+fi # end BASH_SOURCE guard for argument parsing
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi
