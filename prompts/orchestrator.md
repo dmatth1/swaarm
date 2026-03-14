@@ -83,15 +83,19 @@ Replace the contents of `SPEC.md` with a comprehensive specification. The `## In
 - One named subsection (`### Name`) per logical module boundary
 - Every `### Name` subsection must be fully self-contained — a worker reading only that subsection should know exactly what to implement or consume
 - Include: file path, all public function signatures, class field types, API routes with request/response shapes
+- Keep each `### Name` subsection **under 25 lines** — if it would be longer, split it into `NameCore` and `NameDetails` subsections
 - This section is always **last** in SPEC.md
 
 ### 3. Create Task Files
 
 Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order.
 
-**Always include:**
+**Mandatory — do not omit either of these:**
 - `001-project-setup.md` — create directory structure, init files, install dependencies
-- `NNN-testing-and-verification.md` — highest number, runs everything and confirms it works
+- `NNN-testing-and-verification.md` — **highest number**, runs the full test suite end-to-end and confirms everything works. This task is not optional. The build is not complete without it.
+
+**Checkpoint task — required for projects with 10 or more tasks:**
+Add one mid-project checkpoint task at roughly the 40–60% mark (e.g., `NNN-integration-checkpoint.md`). It runs the full test suite, verifies that all components built so far wire together correctly, and all subsequent tasks must depend on it. Use `## Produces: None` and `## Consumes: None`.
 
 **Task count:** create as many tasks as the project requires. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its listed interface definitions. If a task would require understanding more than that, split it.
 
@@ -111,8 +115,8 @@ InterfaceName
 AnotherInterface
 
 ## Acceptance Criteria
-- [ ] Concrete, testable outcome 1
-- [ ] Concrete, testable outcome 2
+- [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
+- [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
 
 ## Technical Details
 - File paths to create/modify
@@ -132,6 +136,15 @@ None | Requires task 001 | Requires tasks 001, 002
 - Lists interface names from SPEC.md `## Interfaces`, one per line
 - Write `None` (bare word, no backticks, on the line after the header) if this task has no interface dependencies
 - Workers read these interface definitions from SPEC.md after claiming the task
+
+**`## Acceptance Criteria` rules:**
+- Every criterion must be expressed as a concrete, runnable command and its expected output
+- Format: `Run: <exact shell command in project directory>` → `Expected: <exact output, exit code, or observable behavior>`
+- Examples:
+  - `Run: python -m pytest tests/test_auth.py -q` → `Expected: all tests pass, exit 0`
+  - `Run: curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health` → `Expected: 200`
+  - `Run: python -c "from src.db import get_session; print('ok')"` → `Expected: ok`
+- Do NOT write criteria like "function exists" or "code is correct" — those are not verifiable
 
 ### 4. Insert Integration Tasks
 
@@ -160,7 +173,17 @@ Example for a full-stack app:
 - `006`–`012` build API routes, auth, middleware (depend on 005, not 001–004 individually)
 - `013-integration-api-layer.md` smoke-tests the full API (depends on 006–012)
 
-### 5. Update PROGRESS.md
+### 5. Verify the Dependency Graph
+
+Before finalizing, audit every task's `## Dependencies`:
+
+**a) No cycles.** For each task, trace its full chain: if task A → B → C → A (or any shorter cycle), you have a deadlock. Workers will stall and the build will never finish. Break cycles by restructuring tasks or splitting work differently.
+
+**b) No spurious dependencies.** For each dependency you listed, ask: "Can a worker actually write the code for this task without the prior task's files existing on disk?" If yes, remove the dependency — it is unnecessary and slows parallelism. Only keep a dependency when the prior task produces a file, schema, or compiled artifact that is literally imported or consumed at build time.
+
+**c) Verify parallelism.** After removing spurious dependencies, count how many tasks at each "depth level" of the graph can run in parallel. If nearly all tasks form a single chain, you have a bottleneck — reconsider whether those serial dependencies are truly required.
+
+### 6. Update PROGRESS.md
 
 ```markdown
 # Progress
@@ -178,7 +201,7 @@ Example for a full-stack app:
 [Any important context for workers]
 ```
 
-### 6. Commit and Push
+### 7. Commit and Push
 
 ```bash
 git add -A
@@ -192,9 +215,10 @@ git push origin main
 
 - **Be specific** — vague tasks produce vague results. Include file paths, function names, CLI commands.
 - **Tasks are the right size when** a worker can complete them reading only SPEC.md (up to `## Interfaces`) + the task file + its listed interface definitions. Split anything larger.
-- **Avoid dependencies where possible** — parallel work is faster.
+- **No circular dependencies** — trace every dependency chain before committing to the task list.
+- **Avoid dependencies where possible** — only add a dependency when the prior task's output is literally required on disk to proceed.
 - **Include setup first** — task 001 should always set up the project skeleton so other tasks have a foundation.
-- **Include verification last** — the final task should run the full project and confirm success.
+- **Include verification last** — the final task must run the full project and confirm success. Do not omit it.
 - **Pick standard, well-known libraries** — don't over-engineer; use what works.
 - **`## Interfaces` is always last in SPEC.md** — workers stop reading before it to save context.
 

@@ -612,6 +612,8 @@ run_with_review() {
     local review_count=0
     local max_reviews=$(( MAX_WORKER_ITERATIONS * agents ))
     local all_complete=false
+    local stuck_cycles=0
+    local max_stuck_cycles=3
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -657,12 +659,14 @@ run_with_review() {
             fi
         done
 
-        # Final-drain check: no new tasks this cycle AND queue fully idle
+        # Final-drain / stuck-state check: no new reviews this cycle
         if [[ "$all_complete" == "false" && "$new_reviews_this_cycle" -eq 0 ]]; then
             local p_count a_count
             p_count=$(pending_count)
             a_count=$(active_count)
             if [[ "$p_count" -eq 0 && "$a_count" -eq 0 ]]; then
+                # Queue fully drained — run final confirmation pass
+                stuck_cycles=0
                 review_count=$((review_count + 1))
                 if [[ "$review_count" -gt "$max_reviews" ]]; then
                     warn "Max reviews ($max_reviews) reached — forcing stop"
@@ -675,7 +679,29 @@ run_with_review() {
                         all_complete=true
                     fi
                 fi
+            elif [[ "$p_count" -gt 0 && "$a_count" -eq 0 ]]; then
+                # Pending tasks exist but no worker is active — potential deadlock
+                stuck_cycles=$((stuck_cycles + 1))
+                if [[ "$stuck_cycles" -ge "$max_stuck_cycles" ]]; then
+                    review_count=$((review_count + 1))
+                    if [[ "$review_count" -gt "$max_reviews" ]]; then
+                        warn "Max reviews ($max_reviews) reached — forcing stop"
+                        all_complete=true
+                    else
+                        log "Stuck state detected (${stuck_cycles} idle cycles) — running stuck reviewer (${review_count})..."
+                        docker_run_reviewer "--stuck--" "$review_count"
+                        stuck_cycles=0
+                        if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                            log "Reviewer signaled ALL_COMPLETE"
+                            all_complete=true
+                        fi
+                    fi
+                fi
+            else
+                stuck_cycles=0
             fi
+        else
+            stuck_cycles=0
         fi
 
         if [[ "$all_complete" == "false" ]]; then
