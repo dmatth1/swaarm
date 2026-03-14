@@ -374,6 +374,14 @@ cmd_resume() {
     success "$pending task(s) pending, $done_n done — spawning $agents worker(s)"
     echo
 
+    # Pre-flight specialist sweep before re-spawning workers
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        _g_specialist_count=0
+        run_specialist_sweep "pre-flight-resume"
+        sync_main
+        echo
+    fi
+
     # Spawn workers
     local failed=0
     if [[ "$USE_DOCKER" == "true" ]]; then
@@ -787,7 +795,8 @@ run_with_review() {
     local reviewed=()
     local blocked_reviewed=()
     local review_count=0
-    _g_specialist_count=0
+    # _g_specialist_count is NOT reset here — it may already be non-zero from a
+    # pre-flight sweep run before workers started; preserve continuity of numbering.
     local max_reviews=$(( MAX_WORKER_ITERATIONS * agents ))
     local all_complete=false
     local stuck_cycles=0
@@ -795,7 +804,10 @@ run_with_review() {
     local last_specialist_sweep=0
     local specialist_interval="${SPECIALIST_INTERVAL:-5}"
     local specialist_early="${SPECIALIST_EARLY_SWEEP:-3}"
+    # If specialists already ran pre-flight, skip the early mid-work sweep so they
+    # don't fire again immediately; next sweep follows the normal interval instead.
     local specialist_first_swept=false
+    [[ "${_g_specialist_count:-0}" -gt 0 ]] && specialist_first_swept=true
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -1304,7 +1316,15 @@ main() {
     fi
     echo
 
-    # Step 3: Spawn workers in parallel
+    # Step 3: Pre-flight specialist sweep — review task breakdown before workers start
+    if [[ "$USE_DOCKER" == "true" ]]; then
+        _g_specialist_count=0
+        run_specialist_sweep "pre-flight"
+        sync_main
+        echo
+    fi
+
+    # Step 4: Spawn workers in parallel
     log "Spawning $NUM_AGENTS worker agents..."
     echo
 

@@ -18,7 +18,7 @@ Your job is fundamentally different from workers: you are not picking tasks from
 git pull origin main
 ```
 
-### Step 2: Understand the Project
+### Step 2: Understand the Project and Determine Phase
 
 Read architecture, stack, file layout, and success criteria:
 
@@ -26,14 +26,34 @@ Read architecture, stack, file layout, and success criteria:
 awk '/^## Interfaces/{exit} {print}' SPEC.md
 ```
 
-Survey what exists:
+Determine whether you are in **pre-flight** (no tasks done yet) or **mid-work** (tasks already completed):
+
+```bash
+ls tasks/done/
+ls tasks/pending/
+```
+
+### Step 3: Apply Your Expertise
+
+**If `tasks/done/` is empty (pre-flight — workers have not started yet):**
+
+You are reviewing the plan, not the code. No code exists. Focus on:
+- Read every task file in `tasks/pending/` — does the breakdown make sense for your domain?
+- Are there tasks that will cause problems your specialization would predict? (e.g., architectural mistakes, missing setup, wrong library choices)
+- Are any tasks missing that should exist? Add them to `tasks/pending/` using the next available number.
+- Does SPEC.md make architectural claims your domain expertise would dispute? Fix them in SPEC.md directly.
+- Verify the dependency graph has no cycles and that parallel tasks are truly independent.
+
+Do not try to write code — there is nothing to build against yet. Improve the plan so workers start on the right foundation.
+
+**If `tasks/done/` has files (mid-work — workers are building):**
+
+Survey what has been built:
 
 ```bash
 git log --oneline -15
 find . -name "*.py" -o -name "*.ts" -o -name "*.go" -o -name "*.rs" -o -name "*.js" | grep -v node_modules | grep -v __pycache__ | grep -v ".git" | sort
 ```
-
-### Step 3: Apply Your Expertise
 
 Explore the codebase through your specific lens. Read the files most relevant to your specialization. Ask: what would a generalist worker miss that you, as a domain specialist, can see?
 
@@ -44,7 +64,9 @@ Look for:
 
 ### Step 4: Make Improvements
 
-Fix what you find directly. Don't just note issues — fix them.
+**Pre-flight**: edit SPEC.md and/or task files in `tasks/pending/`. Add missing tasks. Commit changes.
+
+**Mid-work**: fix what you find directly in the code. Don't just note issues — fix them.
 
 **Commit as you work:**
 ```bash
