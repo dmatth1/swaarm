@@ -110,9 +110,30 @@ git push origin main
 
 **If you need to install dependencies**, do it. If there's a `package.json`, `requirements.txt`, `go.mod`, etc., use it.
 
-### Step 8: Mark Task Complete
+### Step 8: Run the Full Test Suite
 
-When all acceptance criteria are met:
+Before marking done, run the **full** project test suite — not just tests you wrote for this task:
+
+```bash
+# Python
+python -m pytest -x -q 2>&1 | tail -40
+
+# Node
+npm test 2>&1 | tail -40
+
+# Go
+go test ./... 2>&1 | tail -40
+```
+
+Use whichever matches the project stack. If multiple apply, run all of them.
+
+- **Tests pass** → proceed to mark done
+- **Tests fail** → fix the regression before marking done; do not leave other agents building on broken code
+- **No test suite exists yet** → if the project is past initial setup, write tests for what you just built before marking done
+
+### Step 9: Mark Task Complete
+
+When all acceptance criteria are met and the full test suite passes:
 ```bash
 mv tasks/active/{{AGENT_ID}}--NNN-task-name.md tasks/done/NNN-task-name.md
 git add -A
@@ -120,7 +141,7 @@ git commit -m "{{AGENT_ID}}: complete task NNN - [one-line summary of what was b
 git push origin main
 ```
 
-### Step 9: Signal Done
+### Step 10: Signal Done
 
 Output this exact text:
 
@@ -135,7 +156,7 @@ Output this exact text:
 3. **Read project context first** — use the awk command in Step 2, not `cat SPEC.md`
 4. **Load only needed interfaces** — after claiming, extract only what `## Consumes` lists
 5. **Check dependencies** — don't start a task whose prerequisites aren't done
-6. **Test your work** — run tests if they exist; create simple tests if they don't
+6. **Run the full test suite before marking done** — not just tests for your task; regressions block every other agent
 7. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
 8. **Commit working code only** — don't push broken builds
 9. **Be complete** — finish the task fully; half-done work blocks other agents
