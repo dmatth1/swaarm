@@ -537,6 +537,7 @@ docker_run_worker() {
         -e AGENT_ID="worker-$agent_id" \
         -e VERBOSE="$VERBOSE" \
         -e MAX_WORKER_ITERATIONS="$MAX_WORKER_ITERATIONS" \
+        -e MULTI_ROUND=true \
         "$DOCKER_IMAGE" \
         worker "$agent_id" > /dev/null
 
