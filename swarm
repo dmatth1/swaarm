@@ -338,7 +338,6 @@ cmd_resume() {
     echo
 
     # Spawn workers
-    local failed=0
     RUN_ID="$(basename "$OUTPUT_DIR")"
     ensure_docker_image
     trap cleanup_docker EXIT
