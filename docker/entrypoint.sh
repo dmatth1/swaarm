@@ -54,6 +54,49 @@ run_orchestrator() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# INJECT MODE
+# ─────────────────────────────────────────────────────────────
+
+run_inject() {
+    local guidance="${GUIDANCE:-}"
+    local next_task_num="${NEXT_TASK_NUM:-1}"
+    local verbose="${VERBOSE:-false}"
+    local log_file="${LOGS_DIR:-/logs}/inject.log"
+
+    if [[ -z "$guidance" ]]; then
+        echo "ERROR: GUIDANCE env var not set" >&2
+        exit 1
+    fi
+
+    echo "=== Inject agent started $(date) ===" > "$log_file"
+
+    # Clone bare repo
+    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    cd "${WORKSPACE_DIR:-/workspace}"
+    git config user.email "inject@swarm"
+    git config user.name "Swarm Inject"
+
+    # Prepare prompt — use line-conditional replacement to safely handle
+    # special chars (&, \, /) in guidance (same pattern as run_orchestrator)
+    local prompt
+    prompt=$(awk -v guidance="$guidance" -v next_num="$next_task_num" '{
+        if ($0 ~ /\{\{GUIDANCE\}\}/)      { gsub(/\{\{GUIDANCE\}\}/, "");      print guidance }
+        else if ($0 ~ /\{\{NEXT_TASK_NUM\}\}/) { gsub(/\{\{NEXT_TASK_NUM\}\}/, ""); print next_num }
+        else { print }
+    }' "${PROMPTS_DIR:-/prompts}/inject.md")
+
+    echo "Inject agent adding tasks for: $guidance" >> "$log_file"
+
+    if [[ "$verbose" == "true" ]]; then
+        echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1 | tee -a "$log_file"
+    else
+        echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1
+    fi
+
+    echo "=== Inject agent finished $(date) ===" >> "$log_file"
+}
+
+# ─────────────────────────────────────────────────────────────
 # REVIEWER MODE
 # ─────────────────────────────────────────────────────────────
 
@@ -243,11 +286,14 @@ case "$ROLE" in
     reviewer)
         run_reviewer
         ;;
+    inject)
+        run_inject
+        ;;
     specialist)
         run_specialist
         ;;
     *)
-        echo "Unknown role: $ROLE (expected orchestrator, worker, reviewer, or specialist)" >&2
+        echo "Unknown role: $ROLE (expected orchestrator, worker, reviewer, specialist, or inject)" >&2
         exit 1
         ;;
 esac

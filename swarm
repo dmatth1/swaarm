@@ -331,6 +331,12 @@ cmd_resume() {
     success "$pending task(s) pending, $done_n done — spawning $agents worker(s)"
     echo
 
+    # Pre-flight specialist sweep before re-spawning workers
+    _g_specialist_count=0
+    run_specialist_sweep "pre-flight-resume"
+    sync_main
+    echo
+
     # Spawn workers
     RUN_ID="$(basename "$OUTPUT_DIR")"
     ensure_docker_image
@@ -355,6 +361,74 @@ cmd_resume() {
     echo
 
     if [[ "${failed:-0}" -gt 0 ]]; then warn "${failed} worker(s) exited with errors (check logs)"; fi
+}
+
+cmd_inject() {
+    local output_dir="${1:-}"
+    local guidance="${2:-}"
+
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm inject <output-dir> \"<guidance>\""
+        exit 1
+    fi
+    if [[ ! -d "$output_dir/main/tasks" ]]; then
+        error "Not a swarm output directory: $output_dir"
+        exit 1
+    fi
+    if [[ -z "$guidance" ]]; then
+        error "No guidance provided."
+        error "Usage: swarm inject <output-dir> \"<guidance>\""
+        exit 1
+    fi
+
+    OUTPUT_DIR="$(cd "$output_dir" && pwd)"
+    REPO_DIR="$OUTPUT_DIR/repo.git"
+    LOGS_DIR="$OUTPUT_DIR/logs"
+    MAIN_DIR="$OUTPUT_DIR/main"
+    RUN_ID="$(basename "$OUTPUT_DIR")"
+
+    echo
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║       🐝  SWARM INJECT  🐝               ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo
+    info "Output:   $OUTPUT_DIR"
+    info "Guidance: $guidance"
+    echo
+
+    # Pull latest state
+    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+    # Calculate next task number (max across all states + 1)
+    local max_num=0
+    local f num
+    for f in "$MAIN_DIR/tasks/pending/"*.md \
+              "$MAIN_DIR/tasks/active/"*.md \
+              "$MAIN_DIR/tasks/done/"*.md; do
+        [[ -f "$f" ]] || continue
+        num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+        [[ "$num" -gt "$max_num" ]] && max_num="$num"
+    done
+    local next_num=$(( max_num + 1 ))
+
+    log "Current max task number: $max_num → new tasks start at $(printf '%03d' "$next_num")"
+    echo
+
+    ensure_docker_image
+    docker_run_inject "$guidance" "$next_num"
+
+    # Count newly added tasks (tasks with number >= next_num)
+    local added=0
+    for f in "$MAIN_DIR/tasks/pending/"*.md; do
+        [[ -f "$f" ]] || continue
+        num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+        [[ "$num" -ge "$next_num" ]] && added=$((added + 1))
+    done
+
+    echo
+    success "Injection complete — $added new task(s) added to pending"
+    info "Run './swarm resume $output_dir' to start workers"
+    echo
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -433,6 +507,44 @@ docker_run_orchestrator() {
                 tail -20 "$LOGS_DIR/orchestrator.log" >&2
             fi
         fi
+        return 1
+    fi
+}
+
+docker_run_inject() {
+    local guidance="$1"
+    local next_task_num="$2"
+
+    log "Starting inject container..."
+
+    local container_name="swarm-${RUN_ID}-inject"
+    local log_file="$LOGS_DIR/inject.log"
+
+    local oauth_token
+    oauth_token=$(get_claude_oauth_token) || true
+
+    local extra_vol_flags=()
+    for _m in "${EXTRA_MOUNTS[@]+"${EXTRA_MOUNTS[@]}"}"; do extra_vol_flags+=(-v "$_m"); done
+
+    docker run --rm \
+        --name "$container_name" \
+        -v "$REPO_DIR:/upstream" \
+        -v "$LOGS_DIR:/logs" \
+        -v "$PROMPTS_DIR:/prompts:ro" \
+        "${extra_vol_flags[@]+"${extra_vol_flags[@]}"}" \
+        ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
+        -e GUIDANCE="$guidance" \
+        -e NEXT_TASK_NUM="$next_task_num" \
+        -e VERBOSE="$VERBOSE" \
+        "$DOCKER_IMAGE" \
+        inject || true
+
+    sync_main
+
+    if grep -q "INJECTION COMPLETE" "$log_file" 2>/dev/null; then
+        return 0
+    else
+        warn "Inject agent did not signal completion. Check: $log_file"
         return 1
     fi
 }
@@ -686,10 +798,10 @@ run_with_review() {
             docker_run_reviewer "$task_name" "$review_count"
             reviewed+=("$task_name")
 
+            # Ignore ALL_COMPLETE from regular task reviewers — only the final
+            # drain reviewer should signal completion (after the final specialist sweep).
             if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                log "Reviewer signaled ALL_COMPLETE"
-                all_complete=true
-                break
+                log "Reviewer signaled ALL_COMPLETE (deferring to final drain)"
             fi
         done
 
@@ -719,10 +831,9 @@ run_with_review() {
                 docker_run_reviewer "$task_name" "$review_count"
                 blocked_reviewed+=("$task_name")
 
+                # Ignore ALL_COMPLETE from blocked-task reviewers — defer to final drain.
                 if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                    log "Reviewer signaled ALL_COMPLETE"
-                    all_complete=true
-                    break
+                    log "Reviewer signaled ALL_COMPLETE (deferring to final drain)"
                 fi
             done
         fi
@@ -1044,6 +1155,11 @@ case "${1:-}" in
             esac
         done
         cmd_resume "$output_dir" "$override_agents"
+        exit 0
+        ;;
+    inject)
+        shift
+        cmd_inject "${1:-}" "${2:-}"
         exit 0
         ;;
     cleanup)
