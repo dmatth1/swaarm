@@ -91,6 +91,9 @@ Options:
 # Resume after interruption (rate limit, crash, kill)
 ./swarm resume <output-dir>
 ./swarm resume <output-dir> -n 2   # resume with fewer/more workers
+
+# Add tasks to a running or paused swarm
+./swarm inject <output-dir> "<new guidance>"
 ```
 
 ## Examples
@@ -177,6 +180,16 @@ If tasks keep getting stuck on resume, check the logs to understand why:
 ```bash
 tail -50 ./swarm-20240115-143022/logs/worker-1.log
 ```
+
+## Injecting new tasks
+
+While a swarm is paused (or after it finishes), you can add new tasks based on additional guidance:
+
+```bash
+./swarm inject ./swarm-20240115-143022 "Also add rate limiting and an admin dashboard"
+```
+
+The inject agent reads the existing SPEC.md and task history, then creates new numbered task files in `tasks/pending/` that pick up where the existing numbering left off. Run `./swarm resume <dir>` afterward to start workers on the new tasks.
 
 ## Killing agents
 

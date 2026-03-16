@@ -65,6 +65,7 @@ swarm-TIMESTAMP/
 | `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator | Task files created |
 | `<promise>REVIEW_DONE</promise>` | Reviewer | Reviewed, work continues |
 | `<promise>ALL_COMPLETE</promise>` | Reviewer | Project done, tests passing |
+| `<promise>INJECTION COMPLETE</promise>` | Inject agent | New tasks created and pushed |
 
 **Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness fires the reviewer with `--stuck--`. The reviewer diagnoses the deadlock (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
 
@@ -91,6 +92,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 ./swarm status <output-dir>
 ./swarm kill <output-dir> [agent-id]
 ./swarm resume <output-dir> [-n N]   # unsticks active tasks, re-spawns workers
+./swarm inject <output-dir> "<guidance>"  # add tasks to existing run
 ```
 
 `swarm.state` (written at init) stores `SWARM_TASK` and `SWARM_AGENTS` for resume.
