@@ -24,16 +24,21 @@ Directory structure:
 
 ## What You Must Do
 
-### 1. Read Context
+### 1. Understand the Project
 
-Read `SPEC.md` to understand the project, technology stack, and existing interfaces.
+Read `SPEC.md` to understand the project goals, technology stack, and interfaces.
 
-List the existing tasks:
+List and read the existing tasks to understand what's been done, what's in progress, and what's queued:
 ```bash
 ls tasks/done/ tasks/active/ tasks/pending/ 2>/dev/null
 ```
+Read completed task files to understand what was built. Read pending task files to avoid duplicating queued work.
 
-Read any pending task files to avoid duplicating work already queued.
+**Read the actual source code.** Browse the project files — source, tests, configs — to understand what has been built so far, how it's structured, and what state it's in. Your new tasks must account for the real codebase, not just the spec. Look at:
+- Directory structure and file layout
+- Key source files relevant to the new guidance
+- Existing tests and test patterns
+- Build/config files (package.json, pyproject.toml, go.mod, etc.)
 
 ### 2. Create New Task Files
 
