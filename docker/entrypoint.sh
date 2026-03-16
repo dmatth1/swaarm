@@ -12,13 +12,18 @@ if [[ -z "$ROLE" ]]; then
     exit 1
 fi
 
+# Build model flag for claude CLI (empty string if no model specified)
+CLAUDE_MODEL_FLAG=""
+if [[ -n "${MODEL:-}" ]]; then
+    CLAUDE_MODEL_FLAG="--model $MODEL"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # ORCHESTRATOR MODE
 # ─────────────────────────────────────────────────────────────
 
 run_orchestrator() {
     local task="${TASK:-}"
-    local verbose="${VERBOSE:-false}"
     local log_file="/logs/orchestrator.log"
 
     if [[ -z "$task" ]]; then
@@ -43,12 +48,8 @@ run_orchestrator() {
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
-    # Run Claude
-    if [[ "$verbose" == "true" ]]; then
-        echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1 | tee -a "$log_file"
-    else
-        echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1
-    fi
+    # Run Claude — always tee to log for real-time streaming via tail -f
+    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
 
     echo "=== Orchestrator finished $(date) ===" >> "$log_file"
 }
@@ -60,7 +61,6 @@ run_orchestrator() {
 run_inject() {
     local guidance="${GUIDANCE:-}"
     local next_task_num="${NEXT_TASK_NUM:-1}"
-    local verbose="${VERBOSE:-false}"
     local log_file="${LOGS_DIR:-/logs}/inject.log"
 
     if [[ -z "$guidance" ]]; then
@@ -87,11 +87,8 @@ run_inject() {
 
     echo "Inject agent adding tasks for: $guidance" >> "$log_file"
 
-    if [[ "$verbose" == "true" ]]; then
-        echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1 | tee -a "$log_file"
-    else
-        echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1
-    fi
+    # Always tee to log for real-time streaming via tail -f
+    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
 
     echo "=== Inject agent finished $(date) ===" >> "$log_file"
 }
@@ -119,7 +116,8 @@ run_reviewer() {
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
                  /prompts/reviewer.md)
 
-    echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1 || true
+    # Always tee to log for real-time streaming via tail -f
+    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
 
     echo "=== Reviewer ${review_num} finished $(date) ===" >> "$log_file"
 }
@@ -157,7 +155,8 @@ run_specialist() {
         }
     }')
 
-    echo "$prompt" | claude --dangerously-skip-permissions -p >> "$log_file" 2>&1 || true
+    # Always tee to log for real-time streaming via tail -f
+    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
 
     echo "=== Specialist ${specialist_name} (${specialist_num}) finished $(date) ===" >> "$log_file"
 }
@@ -226,17 +225,12 @@ run_worker() {
         echo -e "\n--- Worker $agent_id (pending attempt, $(date)) ---" >> "$log_file"
         echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
 
-        # Run one agent session
+        # Run one agent session — always tee to log for real-time streaming via tail -f
         local output
-        if [[ "$verbose" == "true" ]]; then
-            output=$(echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1 | tee -a "$log_file") || true
-        else
-            output=$(echo "$prompt" | claude --dangerously-skip-permissions -p 2>&1) || true
-            echo "$output" >> "$log_file"
-        fi
+        output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
 
         # Check for rate-limit — keep task claimed, sleep, retry (does NOT count as an iteration)
-        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429 "; then
+        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429 \|hit your limit\|resets.*UTC"; then
             local delay_idx=$(( rate_limit_attempts < ${#backoff_delays[@]} ? rate_limit_attempts : ${#backoff_delays[@]} - 1 ))
             local base_delay="${backoff_delays[$delay_idx]}"
             local jitter=$(( (RANDOM % 41) + 80 ))
