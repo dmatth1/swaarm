@@ -4,6 +4,15 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
+### Worker logs don't stream during claude session
+**Bug** · `docker/entrypoint.sh:261`
+Worker logs show the startup header (`Worker N started`, `State: pending=X`) but then go silent for 15-30 minutes until the claude session completes and dumps all output at once. This makes it impossible to tell if a worker is stuck, blocked, or making progress. The code already uses `tee -a "$log_file"` but the `claude -p` (print mode) appears to buffer its stdout so `tee` sees nothing until the session ends. The previous "log streaming" fix (`tee -a`) only works if the upstream process writes incrementally.
+- [ ] Investigate `stdbuf -oL claude ...` to force line-buffered output
+- [ ] Investigate `script -q /dev/null claude ...` as a pty wrapper to force unbuffering
+- [ ] Check if `claude` CLI has a `--stream-output` or similar flag
+- [ ] If none of the above work, consider a heartbeat approach: worker writes a periodic timestamp to the log from a background loop so the harness knows it's alive
+- [ ] Add test verifying log output appears within 30s of session start
+
 ### stuck detection skips when done_count = 0
 **Bug** · `swarm:796`
 The stuck-state detector (pending > 0, active = 0) only fires when at least one task is already done. If workers repeatedly crash before completing any task, the project idles forever with no reviewer triggered and no recovery.

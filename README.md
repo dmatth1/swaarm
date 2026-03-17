@@ -4,11 +4,20 @@ Build software with a team of parallel Claude Code agents coordinating through a
 
 Inspired by [Anthropic's multi-agent C compiler experiment](https://www.anthropic.com/engineering/building-c-compiler). Same git-based coordination model.
 
-## Requirements
+## Prerequisites
 
-- [Docker](https://docs.docker.com/get-docker/) (agents run in containers by default)
-- `git`
-- `bash` (macOS or Linux)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` CLI must work)
+- [Docker](https://docs.docker.com/get-docker/) running
+- `git` and `bash` (macOS or Linux)
+
+### Auth setup
+
+swarm runs Claude Code inside Docker containers. It extracts your auth token automatically:
+
+- **macOS**: reads from the `Claude Code-credentials` Keychain entry (created when you run `claude` and log in)
+- **Linux**: reads from `~/.claude/credentials.json`
+
+If you haven't authenticated yet, run `claude` once in your terminal and log in. That's it — swarm handles the rest.
 
 The Docker image is built automatically on first run (~2 min). It includes Claude Code CLI, Python, Node.js, Go, and common dev tools.
 

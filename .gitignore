@@ -5,5 +5,8 @@ swarm-test-*/
 # Project duplicates / scratch
 ProQ4-Dup/
 
+# Internal dev docs
+docs/superpowers/
+
 # OS
 .DS_Store
