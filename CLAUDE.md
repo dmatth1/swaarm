@@ -106,6 +106,24 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 `swarm.state` (written at init) stores `SWARM_TASK`, `SWARM_AGENTS`, `SWARM_MODEL`, `SWARM_REPO` for resume.
 
+## Monitoring a Run
+
+```bash
+# Progress ticker (done/active/pending counts + key events)
+tail -f /tmp/swarm-resume-*.log | grep --line-buffered "Progress\|specialist\|Specialist\|worker\|Worker\|reviewer\|Reviewer\|COMPLETE\|spawning"
+
+# All agent logs unified (orchestrator + workers + specialists + reviewers)
+tail -f <output-dir>/logs/orchestrator.log <output-dir>/logs/worker-*.log <output-dir>/logs/specialist-*.log <output-dir>/logs/reviewer-*.log
+
+# Running containers
+docker ps --filter "name=swarm-" --format "table {{.Names}}\t{{.Status}}"
+
+# Task state
+ls <output-dir>/main/tasks/active/   # currently claimed
+ls <output-dir>/main/tasks/pending/  # waiting for workers
+ls <output-dir>/main/tasks/done/     # completed
+```
+
 ## Common Failure Modes
 
 | Symptom | Cause | Fix |
