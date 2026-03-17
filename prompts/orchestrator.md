@@ -57,7 +57,7 @@ If this is an augment (SPEC.md already exists, tasks already exist):
 2. Read existing task files (`tasks/done/`, `tasks/pending/`) to understand what's been built and what's queued
 3. **Read the actual source code** — browse project files, tests, configs to understand current state
 4. **Update SPEC.md** — add new interfaces, update success criteria, adjust architecture if the new guidance requires it. Do not remove existing content unless it's being replaced.
-5. **Update CLAUDE.md** — add new modules, update build commands if changed
+5. **Update CLAUDE.md** — add new modules, update build commands if changed. If `CLAUDE.md` doesn't exist, create it (see Step 3 for the template).
 6. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
 7. **Update PROGRESS.md** — add new tasks to the list
 8. Commit and push, then signal `ORCHESTRATION COMPLETE`
