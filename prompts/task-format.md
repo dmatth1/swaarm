@@ -1,6 +1,6 @@
 # Task Creation Guide
 
-This section applies to any agent creating task files (orchestrator, inject, reviewer, specialist).
+This section applies to any agent creating task files (orchestrator, reviewer, specialist).
 
 ## Task File Format
 
