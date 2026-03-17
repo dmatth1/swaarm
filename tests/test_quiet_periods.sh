@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Tests for quiet period feature: pause workers, drain, full review + specialists.
+# Tests for periodic full review + specialist sweep (every N completions, concurrent with workers).
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$TESTS_DIR/helpers.sh"
 
-# ─── Test 1: Quiet period triggers after N completions ─────────────────────────
+# ─── Test 1: Full review + specialist sweep triggers after N completions ──────
 
-setup_test "quiet period: triggers after N completions (interval=3)"
+setup_test "periodic review: triggers after N completions (interval=3)"
 trap teardown_test EXIT
 
 init_test_workspace
 
-# Pre-populate 3 done tasks (enough to trigger quiet period at interval=3)
+# Pre-populate 3 done tasks (enough to trigger at interval=3)
 push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done 001"
 push_file_to_repo "tasks/done/002-build.md" "# Task 002" "done 002"
 push_file_to_repo "tasks/done/003-routes.md" "# Task 003" "done 003"
@@ -29,15 +29,9 @@ sync_main()                      { :; }
 MAX_WORKER_ITERATIONS=5
 QUIET_PERIOD_INTERVAL=3
 
-PAUSE_CALLS=0
-UNPAUSE_CALLS=0
-DRAIN_CALLS=0
 SPECIALIST_SWEEPS=()
 REVIEWER_CALLS=()
 
-pause_workers()         { PAUSE_CALLS=$((PAUSE_CALLS + 1)); }
-unpause_workers()       { UNPAUSE_CALLS=$((UNPAUSE_CALLS + 1)); }
-wait_for_active_drain() { DRAIN_CALLS=$((DRAIN_CALLS + 1)); }
 run_specialist_sweep()  { SPECIALIST_SWEEPS+=("$1"); }
 
 docker_run_reviewer() {
@@ -52,19 +46,7 @@ docker_run_reviewer() {
 
 run_with_review 1
 
-[[ "$PAUSE_CALLS" -ge 1 ]] \
-    && pass "pause_workers called ($PAUSE_CALLS time(s))" \
-    || fail "pause_workers not called"
-
-[[ "$UNPAUSE_CALLS" -ge 1 ]] \
-    && pass "unpause_workers called ($UNPAUSE_CALLS time(s))" \
-    || fail "unpause_workers not called"
-
-[[ "$DRAIN_CALLS" -ge 1 ]] \
-    && pass "wait_for_active_drain called ($DRAIN_CALLS time(s))" \
-    || fail "wait_for_active_drain not called"
-
-# Check that a full review ran during quiet period
+# Check that a full review ran
 found_full_review=false
 for call in "${REVIEWER_CALLS[@]}"; do
     if [[ "$call" == "--full-review--:full" ]]; then
@@ -73,27 +55,27 @@ for call in "${REVIEWER_CALLS[@]}"; do
     fi
 done
 [[ "$found_full_review" == "true" ]] \
-    && pass "--full-review-- ran with mode=full during quiet period" \
+    && pass "--full-review-- ran with mode=full" \
     || fail "no --full-review-- call found (calls: ${REVIEWER_CALLS[*]})"
 
-# Check specialist sweep ran during quiet period
-found_qp_sweep=false
+# Check specialist sweep ran
+found_sweep=false
 for sweep in "${SPECIALIST_SWEEPS[@]+"${SPECIALIST_SWEEPS[@]}"}"; do
-    if [[ "$sweep" == *"quiet-period"* ]]; then
-        found_qp_sweep=true
+    if [[ "$sweep" == *"at "* ]]; then
+        found_sweep=true
         break
     fi
 done
-[[ "$found_qp_sweep" == "true" ]] \
-    && pass "specialist sweep ran during quiet period" \
-    || fail "no quiet-period specialist sweep (sweeps: ${SPECIALIST_SWEEPS[*]:-none})"
+[[ "$found_sweep" == "true" ]] \
+    && pass "specialist sweep ran at completion threshold" \
+    || fail "no specialist sweep (sweeps: ${SPECIALIST_SWEEPS[*]:-none})"
 
 teardown_test
 trap - EXIT
 
 # ─── Test 2: Quick mode used for per-task reviews ─────────────────────────────
 
-setup_test "quiet period: per-task reviews use quick mode"
+setup_test "periodic review: per-task reviews use quick mode"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -107,12 +89,9 @@ cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 run_specialist_sweep()           { :; }
 MAX_WORKER_ITERATIONS=5
-QUIET_PERIOD_INTERVAL=999  # no quiet period
+QUIET_PERIOD_INTERVAL=999  # no periodic review
 
 REVIEWER_MODES=()
 docker_run_reviewer() {
@@ -135,9 +114,9 @@ run_with_review 1
 teardown_test
 trap - EXIT
 
-# ─── Test 3: No quiet period before threshold ──────────────────────────────────
+# ─── Test 3: No periodic review before threshold ─────────────────────────────
 
-setup_test "quiet period: does not trigger below threshold"
+setup_test "periodic review: does not trigger below threshold"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -156,12 +135,11 @@ run_specialist_sweep()           { :; }
 MAX_WORKER_ITERATIONS=5
 QUIET_PERIOD_INTERVAL=5  # threshold is 5, only 2 done
 
-PAUSE_CALLS=0
-pause_workers()         { PAUSE_CALLS=$((PAUSE_CALLS + 1)); }
-unpause_workers()       { :; }
-wait_for_active_drain() { :; }
-
+FULL_REVIEW_CALLS=0
 docker_run_reviewer() {
+    if [[ "$1" == "--full-review--" ]]; then
+        FULL_REVIEW_CALLS=$((FULL_REVIEW_CALLS + 1))
+    fi
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
         echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
@@ -172,20 +150,20 @@ docker_run_reviewer() {
 
 run_with_review 1
 
-[[ "$PAUSE_CALLS" -eq 0 ]] \
-    && pass "no quiet period triggered (2 done < threshold 5)" \
-    || fail "quiet period triggered too early ($PAUSE_CALLS pause calls)"
+[[ "$FULL_REVIEW_CALLS" -eq 0 ]] \
+    && pass "no periodic full review triggered (2 done < threshold 5)" \
+    || fail "periodic review triggered too early ($FULL_REVIEW_CALLS calls)"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 4: Quiet period interval is configurable ─────────────────────────────
+# ─── Test 4: Interval is configurable ────────────────────────────────────────
 
-setup_test "quiet period: QUIET_PERIOD_INTERVAL is configurable"
+setup_test "periodic review: QUIET_PERIOD_INTERVAL is configurable"
 trap teardown_test EXIT
 
 init_test_workspace
-# 5 done tasks + threshold of 5 = exactly hits quiet period
+# 5 done tasks + threshold of 5 = exactly hits periodic review
 for i in $(seq 1 5); do
     push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
 done
@@ -202,12 +180,11 @@ run_specialist_sweep()           { :; }
 MAX_WORKER_ITERATIONS=5
 QUIET_PERIOD_INTERVAL=5
 
-PAUSE_CALLS=0
-pause_workers()         { PAUSE_CALLS=$((PAUSE_CALLS + 1)); }
-unpause_workers()       { :; }
-wait_for_active_drain() { :; }
-
+FULL_REVIEW_CALLS=0
 docker_run_reviewer() {
+    if [[ "$1" == "--full-review--" ]]; then
+        FULL_REVIEW_CALLS=$((FULL_REVIEW_CALLS + 1))
+    fi
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
         echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
@@ -218,16 +195,16 @@ docker_run_reviewer() {
 
 run_with_review 1
 
-[[ "$PAUSE_CALLS" -ge 1 ]] \
-    && pass "quiet period triggered at custom interval (5)" \
-    || fail "quiet period not triggered at interval=5 with 5 done tasks"
+[[ "$FULL_REVIEW_CALLS" -ge 1 ]] \
+    && pass "periodic review triggered at custom interval (5)" \
+    || fail "periodic review not triggered at interval=5 with 5 done tasks"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 5: Full review mode used during quiet period ─────────────────────────
+# ─── Test 5: Full review mode used during periodic review ────────────────────
 
-setup_test "quiet period: full review has restructuring powers"
+setup_test "periodic review: full review has restructuring powers"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -244,9 +221,6 @@ check_and_respawn_dead_workers() { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 run_specialist_sweep()           { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 MAX_WORKER_ITERATIONS=20
 QUIET_PERIOD_INTERVAL=10
 
@@ -266,8 +240,8 @@ docker_run_reviewer() {
 run_with_review 1
 
 [[ "${#FULL_REVIEW_TASKS[@]}" -ge 1 ]] \
-    && pass "full review ran during quiet period" \
-    || fail "no full review during quiet period"
+    && pass "full review ran during periodic review" \
+    || fail "no full review during periodic review"
 
 if [[ "${#FULL_REVIEW_TASKS[@]}" -ge 1 ]]; then
     [[ "${FULL_REVIEW_TASKS[0]}" == "--full-review--" ]] \
@@ -282,7 +256,7 @@ trap - EXIT
 
 # ─── Test 6: REVIEW_MODE passed through entrypoint ────────────────────────────
 
-setup_test "quiet period: REVIEW_MODE substituted in reviewer prompt"
+setup_test "periodic review: REVIEW_MODE substituted in reviewer prompt"
 trap teardown_test EXIT
 
 ENTRYPOINT="$TESTS_DIR/../docker/entrypoint.sh"
@@ -299,9 +273,9 @@ grep -q '{{REVIEW_MODE}}' "$TESTS_DIR/../prompts/reviewer.md" \
 teardown_test
 trap - EXIT
 
-# ─── Test 7: Reviewer prompt has --full-review-- handling ──────────────────────
+# ─── Test 7: Reviewer prompt has --full-review-- handling ─────────────────────
 
-setup_test "quiet period: reviewer prompt handles --full-review--"
+setup_test "periodic review: reviewer prompt handles --full-review--"
 trap teardown_test EXIT
 
 REVIEWER_PROMPT="$TESTS_DIR/../prompts/reviewer.md"
@@ -317,9 +291,9 @@ grep -q 'quick' "$REVIEWER_PROMPT" \
 teardown_test
 trap - EXIT
 
-# ─── Test 8: docker_run_reviewer passes REVIEW_MODE ───────────────────────────
+# ─── Test 8: docker_run_reviewer passes REVIEW_MODE ──────────────────────────
 
-setup_test "quiet period: docker_run_reviewer passes REVIEW_MODE env var"
+setup_test "periodic review: docker_run_reviewer passes REVIEW_MODE env var"
 trap teardown_test EXIT
 
 init_test_workspace

@@ -447,9 +447,6 @@ ensure_docker_image()            { :; }
 monitor_progress()               { :; }
 cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 run_specialist_sweep()           { :; }
 sleep()                          { :; }
 sync_main()                      { sync; }
@@ -528,9 +525,6 @@ ensure_docker_image()            { :; }
 monitor_progress()               { :; }
 cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 sleep()                          { :; }
 sync_main()                      { sync; }
 QUIET_PERIOD_INTERVAL=999
@@ -664,9 +658,6 @@ docker_run_worker()              { :; }
 monitor_progress()               { :; }
 cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 
@@ -734,9 +725,6 @@ ensure_docker_image()            { :; }
 monitor_progress()               { :; }
 cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
 sleep()                          { :; }
 sync_main()                      { sync; }
 QUIET_PERIOD_INTERVAL=999
@@ -832,7 +820,7 @@ trap - EXIT
 
 # ─── Test 10: Quiet period sweep fires every N completions ────────────────────
 
-setup_test "e2e: quiet period — specialist sweep fires after N task completions"
+setup_test "e2e: periodic review — specialist sweep fires after N task completions"
 trap teardown_e2e EXIT
 
 init_test_workspace
@@ -892,36 +880,23 @@ docker_run_reviewer() {
     fi
 }
 
-# Track sweep labels AND pause/unpause
+# Track sweep labels
 SWEEP_LABELS=()
-PAUSE_CALLS=0
-UNPAUSE_CALLS=0
 run_specialist_sweep() { SWEEP_LABELS+=("$1"); }
-pause_workers()        { PAUSE_CALLS=$((PAUSE_CALLS + 1)); }
-unpause_workers()      { UNPAUSE_CALLS=$((UNPAUSE_CALLS + 1)); }
-wait_for_active_drain() { :; }
 
 run_with_review 1
 
-# Verify quiet period fired (at 3 completions)
-found_qp=false
+# Verify periodic review fired (at 3 completions)
+found_periodic=false
 for label in "${SWEEP_LABELS[@]+"${SWEEP_LABELS[@]}"}"; do
-    if [[ "$label" == *"quiet-period"* ]]; then
-        found_qp=true
+    if [[ "$label" == *"at "* ]]; then
+        found_periodic=true
         break
     fi
 done
-[[ "$found_qp" == "true" ]] \
-    && pass "quiet-period specialist sweep fired after N completions" \
-    || fail "no quiet-period sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
-
-[[ "$PAUSE_CALLS" -ge 1 ]] \
-    && pass "workers paused during quiet period ($PAUSE_CALLS)" \
-    || fail "workers not paused"
-
-[[ "$UNPAUSE_CALLS" -ge 1 ]] \
-    && pass "workers resumed after quiet period ($UNPAUSE_CALLS)" \
-    || fail "workers not resumed"
+[[ "$found_periodic" == "true" ]] \
+    && pass "periodic specialist sweep fired after N completions" \
+    || fail "no periodic sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
 
 # Verify final sweep also ran
 found_final=false

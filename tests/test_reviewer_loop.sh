@@ -14,9 +14,6 @@ setup_review_mocks() {
     cleanup_docker()                 { :; }
     check_and_respawn_dead_workers() { :; }
     run_specialist_sweep()           { :; }
-    pause_workers()                  { :; }
-    unpause_workers()                { :; }
-    wait_for_active_drain()          { :; }
     # Override sleep builtin to avoid delays
     sleep()                          { :; }
     # sync_main is a no-op: MAIN_DIR is pre-populated by push_file_to_repo

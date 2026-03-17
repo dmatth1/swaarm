@@ -663,48 +663,6 @@ run_specialist_sweep() {
     sync_main
 }
 
-pause_workers() {
-    local agents="$1"
-    log "Pausing $agents worker(s) for quiet period..."
-    local i
-    for i in $(seq 1 "$agents"); do
-        local cid_file="$OUTPUT_DIR/pids/worker-${i}.cid"
-        [[ -f "$cid_file" ]] || continue
-        local cname
-        cname=$(cat "$cid_file" 2>/dev/null) || continue
-        [[ -z "$cname" ]] && continue
-        docker pause "$cname" 2>/dev/null || true
-    done
-}
-
-unpause_workers() {
-    local agents="$1"
-    log "Resuming $agents worker(s) after quiet period..."
-    local i
-    for i in $(seq 1 "$agents"); do
-        local cid_file="$OUTPUT_DIR/pids/worker-${i}.cid"
-        [[ -f "$cid_file" ]] || continue
-        local cname
-        cname=$(cat "$cid_file" 2>/dev/null) || continue
-        [[ -z "$cname" ]] && continue
-        docker unpause "$cname" 2>/dev/null || true
-    done
-}
-
-wait_for_active_drain() {
-    local max_wait=600
-    local waited=0
-    while [[ "$(active_count)" -gt 0 && "$waited" -lt "$max_wait" ]]; do
-        sleep 5
-        sync_main
-        waited=$((waited + 5))
-        log "Quiet period: waiting for active tasks to drain ($(active_count) remaining, ${waited}s elapsed)"
-    done
-    if [[ "$(active_count)" -gt 0 ]]; then
-        warn "Quiet period: active tasks did not drain after ${max_wait}s — proceeding anyway"
-    fi
-}
-
 check_and_respawn_dead_workers() {
     local agents="$1"
     local i
@@ -875,26 +833,18 @@ run_with_review() {
             done
         fi
 
-        # Quiet period: every N completions, pause workers, drain, full review + specialists
+        # Periodic full review + specialist sweep (every N completions, concurrent with workers)
         if [[ "$all_complete" == "false" ]]; then
             local current_done
             current_done=$(done_count)
             if [[ "$current_done" -ge $(( last_quiet_period_at + quiet_period_interval )) && "$current_done" -gt 0 ]]; then
                 last_quiet_period_at="$current_done"
-                log "=== Entering quiet period at $current_done tasks ==="
-
-                pause_workers "$agents"
-                wait_for_active_drain
-                sync_main
 
                 review_count=$((review_count + 1))
-                log "Running full review during quiet period (${review_count})..."
+                log "Running full review at $current_done tasks (${review_count})..."
                 docker_run_reviewer "--full-review--" "$review_count" "full"
 
-                run_specialist_sweep "quiet-period at ${current_done} tasks"
-
-                unpause_workers "$agents"
-                log "=== Quiet period complete, workers resumed ==="
+                run_specialist_sweep "at ${current_done} tasks"
             fi
         fi
 

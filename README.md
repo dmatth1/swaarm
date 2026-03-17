@@ -58,7 +58,7 @@ You: ./swarm "Build a todo REST API" --agents 3
   Your project, complete in main/
 ```
 
-Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 10 completions, a **quiet period** pauses workers for a full review + specialist sweep (code quality, reliability, test coverage, performance, documentation, project management).
+Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 10 completions, a full review + specialist sweep runs concurrently (code quality, reliability, test coverage, performance, documentation, project management).
 
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 

@@ -112,14 +112,12 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Audited all 3 `grep -o '^[0-9]*'` → `[[ ]]` patterns — all use `$((10#$num))`
 - [x] Test was in `test_inject.sh` (deleted with inject deprecation) — test coverage lost, covered by code audit
 
-### Quiet periods for reviewer/specialist sweeps
-- [x] Every N completions (default 10, `QUIET_PERIOD_INTERVAL`), pause workers via `docker pause`
-- [x] `wait_for_active_drain()` waits up to 10m for active tasks to complete
-- [x] Full reviewer (`--full-review--` mode) runs with restructuring powers during quiet period
-- [x] Specialist sweep runs during quiet period (exclusive repo access)
-- [x] Workers resume via `docker unpause` after quiet period
+### Periodic full reviews + specialist sweeps
+- [x] Every N completions (default 10, `QUIET_PERIOD_INTERVAL`), full reviewer + specialist sweep run concurrently with workers
+- [x] Full reviewer (`--full-review--` mode) has restructuring powers (CLAUDE.md, manifests, task reordering)
 - [x] Per-task reviews use `quick` mode (tests only, skip CLAUDE.md/manifest updates and task restructuring)
 - [x] Reviewer prompt supports `{{REVIEW_MODE}}` (quick/full) and `--full-review--` COMPLETED_TASK
+- [x] Previously used `docker pause`/`unpause` — reverted to concurrent model (no worker idle time, git conflicts handled by rebase)
 - [x] Tests: `tests/test_quiet_periods.sh` (8 tests)
 
 ### Deprecate inject agent
