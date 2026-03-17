@@ -14,8 +14,9 @@ docker image inspect alpine &>/dev/null || docker pull alpine -q > /dev/null
 setup_test "cleanup: removes all orphaned swarm containers"
 trap teardown_test EXIT
 
-C1="swarm-test-run1-worker-1-$$"
-C2="swarm-test-run1-worker-2-$$"
+TUID="cleanup-$$-$RANDOM"
+C1="swarm-test-${TUID}-worker-1"
+C2="swarm-test-${TUID}-worker-2"
 docker run -d --name "$C1" alpine sleep 60 > /dev/null
 docker run -d --name "$C2" alpine sleep 60 > /dev/null
 
@@ -24,7 +25,7 @@ load_swarm
 # accidentally stop containers from a real swarm run in progress.
 cmd_cleanup() {
     local containers
-    containers=$(docker ps -aq --filter "name=swarm-test-" 2>/dev/null)
+    containers=$(docker ps -aq --filter "name=swarm-test-${TUID}" 2>/dev/null)
     if [[ -n "$containers" ]]; then
         echo "$containers" | xargs docker stop 2>/dev/null || true
         echo "$containers" | xargs docker rm   2>/dev/null || true
