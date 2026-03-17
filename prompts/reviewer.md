@@ -129,13 +129,48 @@ ls tasks/pending/
 ls tasks/active/
 ```
 
-### Step 6: Take Corrective Action (if needed)
+### Step 6: Update CLAUDE.md
+
+`CLAUDE.md` is the living project index — Claude Code reads it automatically on every worker invocation. After each task completion, update it to reflect reality:
+
+```bash
+cat CLAUDE.md
+```
+
+Update these sections as needed:
+- **Project Structure**: add new files/directories created by the completed task
+- **Module Map**: add or update entries for new or changed components
+- **Key Patterns**: note any conventions the worker established that future workers should follow
+- **Build & Run**: update if build steps, dependencies, or test commands changed
+
+**Rules for CLAUDE.md updates:**
+- Keep it **under 200 lines** — if it's growing past that, compact by removing stale entries and merging related items
+- Reflect current state only — no history, no changelogs
+- Don't duplicate SPEC.md — CLAUDE.md is for orientation (what exists, how to build), SPEC.md is for contracts (interfaces, criteria)
+
+If you updated CLAUDE.md, include it in your commit.
+
+### Step 7: Update File Manifests on Pending Tasks
+
+After reviewing, check if the just-completed task produced or modified files that pending tasks will need to read. For each pending task:
+
+```bash
+ls tasks/pending/
+```
+
+Read each pending task's `## Relevant Files` section. If the completed task created or changed files that a pending task depends on (but doesn't list), add them. If a pending task lists files that were moved, renamed, or deleted, update the paths.
+
+This keeps file manifests accurate as the project evolves — the orchestrator's initial guesses improve with ground truth.
+
+Only update `## Relevant Files` — do not change other sections of pending tasks.
+
+### Step 8: Take Corrective Action (if needed)
 
 You may:
 - **Add new task files** to `tasks/pending/` if gaps, integration failures, test failures, or missing work is found
 - **Update `## Interfaces`** in SPEC.md if an implementation deviates from the contract in a way that downstream tasks should know about
 
-You must **never** modify or remove existing task files.
+You must **never** remove existing task files (updating `## Relevant Files` on pending tasks is allowed).
 
 If you add tasks or update SPEC.md, commit and push:
 ```bash
@@ -144,7 +179,7 @@ git commit -m "reviewer-{{REVIEW_NUM}}: [description of correction]"
 git push origin main
 ```
 
-### Step 7: Signal
+### Step 9: Signal
 
 Output exactly one of these signals:
 
@@ -165,4 +200,5 @@ Signal `<promise>REVIEW_DONE</promise>` otherwise (work continues).
 - **Run tests every time** — code inspection alone is not sufficient to catch integration failures
 - **Check actual files** — don't assume tasks were completed correctly just because they're in `tasks/done/`
 - **Interface deviations**: if a worker implemented something differently than SPEC.md specifies, update `## Interfaces` to match reality before downstream tasks consume the contract
+- **Keep file manifests current**: after each task completion, update `## Relevant Files` on pending tasks to reflect what was actually built — add new files workers will need, fix stale paths
 - **Deadlocks**: if `COMPLETED_TASK` is `--stuck--`, you must add or fix tasks to break the blockage — signaling `REVIEW_DONE` without fixing the stuck state will just trigger another `--stuck--` pass

@@ -73,9 +73,22 @@ git pull origin main
 # Choose a different task and try again from Step 3
 ```
 
-### Step 6: Load Interface Context
+### Step 6: Load Relevant Files
 
-After a successful claim, enumerate the interfaces your task consumes:
+After a successful claim, check the task's `## Relevant Files` section:
+
+```bash
+awk '/^## Relevant Files/{found=1; next} found && /^## /{exit} found && NF{print}' \
+  tasks/active/{{AGENT_ID}}--NNN-task-name.md
+```
+
+Read each file listed with a `Read:` or `Modify:` prefix — these give you the context needed for this task. Files marked `Skip:` can be ignored. Files marked `Create:` don't exist yet.
+
+This list is a starting point, not a hard boundary. If you discover you need context from a file not listed, read it. But most tasks should not require reading beyond this list.
+
+### Step 7: Load Interface Context
+
+After loading relevant files, enumerate the interfaces your task consumes:
 
 ```bash
 awk '/^## Consumes/{found=1; next} found && /^## /{exit} found && NF{print}' \
@@ -93,7 +106,7 @@ awk '/^### InterfaceName$/{found=1; next} found && /^### /{exit} found{print}' S
 
 Read each extracted definition carefully — this is the contract you must implement against.
 
-### Step 7: Do the Work
+### Step 8: Do the Work
 
 Read `tasks/active/{{AGENT_ID}}--NNN-task-name.md` carefully.
 
@@ -115,7 +128,7 @@ git push origin main
 
 **If you need to install dependencies**, do it. If there's a `package.json`, `requirements.txt`, `go.mod`, etc., use it.
 
-### Step 8: Run the Full Test Suite
+### Step 9: Run the Full Test Suite
 
 Before marking done, run the **full** project test suite — not just tests you wrote for this task:
 
@@ -136,7 +149,7 @@ Use whichever matches the project stack. If multiple apply, run all of them.
 - **Tests fail** → fix the regression before marking done; do not leave other agents building on broken code
 - **No test suite exists yet** → if the project is past initial setup, write tests for what you just built before marking done
 
-### Step 9: Mark Task Complete
+### Step 10: Mark Task Complete
 
 When all acceptance criteria are met and the full test suite passes:
 ```bash
@@ -146,7 +159,7 @@ git commit -m "{{AGENT_ID}}: complete task NNN - [one-line summary of what was b
 git push origin main
 ```
 
-### Step 10: Signal Done
+### Step 11: Signal Done
 
 Output this exact text:
 
@@ -159,12 +172,13 @@ Output this exact text:
 1. **Always `git pull` before starting** — prevents conflicts
 2. **Push your claim immediately** — locks the task so others don't grab it
 3. **Read project context first** — use the awk command in Step 2, not `cat SPEC.md`
-4. **Load only needed interfaces** — after claiming, extract only what `## Consumes` lists
-5. **Check dependencies** — don't start a task whose prerequisites aren't done
-6. **Tests are a deliverable** — write every test listed in `## Tests` as part of the task, then run the full suite before marking done; regressions block every other agent
-7. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
-8. **Commit working code only** — don't push broken builds
-9. **Be complete** — finish the task fully; half-done work blocks other agents
+4. **Start with Relevant Files** — read files listed in `## Relevant Files` before exploring further; most tasks don't need more
+5. **Load only needed interfaces** — after claiming, extract only what `## Consumes` lists
+6. **Check dependencies** — don't start a task whose prerequisites aren't done
+7. **Tests are a deliverable** — write every test listed in `## Tests` as part of the task, then run the full suite before marking done; regressions block every other agent
+8. **Never touch another agent's active tasks** — only modify files in `tasks/active/{{AGENT_ID}}--*`
+9. **Commit working code only** — don't push broken builds
+10. **Be complete** — finish the task fully; half-done work blocks other agents
 
 ---
 

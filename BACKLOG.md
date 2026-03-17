@@ -11,13 +11,6 @@ Every worker invocation starts cold — re-reads SPEC.md, scans the task queue, 
 - [ ] Keep `CLAUDE.md` under 200 lines — compact when it grows, preserving only current state (not history)
 - [ ] Update orchestrator and reviewer prompts accordingly
 
-### Task-scoped file manifests
-Workers currently scan the entire codebase to figure out which files are relevant to their task. The orchestrator already knows (roughly) which files each task will touch — make it explicit in the task file. Workers read only those files instead of exploring everything, cutting orientation tokens significantly on larger projects.
-- [ ] Orchestrator includes a `## Relevant files` section in each task file (files to create, read, or modify + why)
-- [ ] Orchestrator includes a `## Don't need to read` section for large projects to explicitly exclude irrelevant modules
-- [ ] Reviewer updates file manifests on remaining pending tasks after each completion (correcting orchestrator's initial guesses with ground truth)
-- [ ] Update orchestrator and worker prompts accordingly
-
 ### Worker logs don't stream during claude session
 **Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
 Worker logs show the startup header (`Worker N started`, `State: pending=X`) but then go silent for 15-30 minutes until the claude session completes and dumps all output at once. Root cause: `claude -p` detects stdout is a pipe and block-buffers (Node.js default for non-TTY stdout). `tee -a` only helps if the upstream process writes incrementally.
@@ -110,3 +103,9 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Stored as `SWARM_MODEL` in `swarm.state`, restored on resume
 - [x] Passed to all `docker_run_*` as `MODEL` env var, then `--model` to claude CLI
 - [x] Tests: `tests/test_model_flag.sh` (12 tests)
+
+### Task-scoped file manifests
+- [x] Orchestrator includes `## Relevant Files` section in task file format (Read/Modify/Create/Skip prefixes with annotations)
+- [x] Worker prompt adds Step 6: Load Relevant Files between claim and interface loading
+- [x] Reviewer updates `## Relevant Files` on pending tasks after each completion
+- [x] Framed as hints, not hard constraints — workers can explore beyond the list if needed

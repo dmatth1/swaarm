@@ -21,6 +21,7 @@ Directory structure:
 - `tasks/active/` — workers move tasks here while working (don't touch)
 - `tasks/done/` — workers move tasks here when done (don't touch)
 - `SPEC.md` — project specification (you write this)
+- `CLAUDE.md` — living project index for worker orientation (you write this)
 - `PROGRESS.md` — progress tracker (you write this)
 
 ---
@@ -114,7 +115,38 @@ The six default specialists above run on every project. Add project-specific spe
 
 Each `### Name` subsection is the specialist's role description — written in second person, specific about what to look for and what to do.
 
-### 3. Create Task Files
+### 3. Write CLAUDE.md
+
+Create `CLAUDE.md` as a living project index. Claude Code reads this file automatically on every worker invocation — it's the fastest way to orient a cold-start agent. Keep it **under 200 lines**.
+
+```markdown
+# [Project Name]
+
+## What This Is
+[1-2 sentences: what the project does]
+
+## Tech Stack
+- Language: [e.g., Python 3.11]
+- Framework: [e.g., FastAPI]
+- Database: [e.g., SQLite]
+- Test runner: [e.g., pytest]
+
+## Project Structure
+[Current directory layout — update as files are created]
+
+## Build & Run
+[Exact commands to install deps, build, run, and test]
+
+## Key Patterns
+[Conventions workers should follow: naming, error handling, imports, etc.]
+
+## Module Map
+[One line per module/component: what it does, its main file(s)]
+```
+
+Do **not** duplicate SPEC.md content — CLAUDE.md is for orientation (what exists, how to build, where things are), SPEC.md is for contracts (interfaces, acceptance criteria). Workers read CLAUDE.md first (automatically), then SPEC.md (on demand).
+
+### 4. Create Task Files
 
 Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order.
 
@@ -126,7 +158,7 @@ Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Numb
 **Checkpoint task — required for projects with 10 or more tasks:**
 Add one mid-project checkpoint task at roughly the 40–60% mark (e.g., `NNN-integration-checkpoint.md`). It runs the full test suite, verifies that all components built so far wire together correctly, and all subsequent tasks must depend on it. Use `## Produces: None` and `## Consumes: None`.
 
-**Task count:** create as many tasks as the project requires. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its listed interface definitions. If a task would require understanding more than that, split it.
+**Task count:** create as many tasks as the project requires. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its `## Relevant Files` and listed interface definitions. If a task would require understanding more than that, split it.
 
 **Task file format:**
 
@@ -143,6 +175,13 @@ Implements: `InterfaceName`
 InterfaceName
 AnotherInterface
 
+## Relevant Files
+Read: `path/to/dependency.py` — why this file matters for this task
+Read: `path/to/integration_point.py` — what the worker needs from it
+Modify: `path/to/existing.py` — what changes are needed
+Create: `path/to/new_file.py` — what this file will contain
+Skip: `path/to/unrelated/` — not needed for this task
+
 ## Acceptance Criteria
 - [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
 - [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
@@ -154,7 +193,6 @@ AnotherInterface
 None (for setup/infra tasks that produce no testable logic)
 
 ## Technical Details
-- File paths to create/modify
 - Function signatures, API routes, data schemas
 - Commands to run (e.g., `pip install X`, `go mod init`)
 - Any specific implementation requirements
@@ -179,6 +217,13 @@ None | Requires task 001 | Requires tasks 001, 002
 - Be specific enough that the worker knows exactly what scenarios to cover — don't write "add tests"; write what the tests must verify
 - Integration tasks and the final verification task should include E2E criteria
 
+**`## Relevant Files` rules:**
+- List every file the worker should read, modify, or create — with a brief annotation explaining why
+- Prefixes: `Read:` (context only), `Modify:` (change existing file), `Create:` (new file), `Skip:` (explicitly irrelevant — use for large directories workers might waste time exploring)
+- This is a hint, not a hard constraint — workers may explore beyond the list if needed, but most tasks should not require it
+- For setup tasks (001, 002), this section can be minimal since there's no existing codebase yet
+- Keep the list focused: 3–8 entries is typical. If you need more than 10, the task may be too large — split it
+
 **`## Acceptance Criteria` rules:**
 - Every criterion must be expressed as a concrete, runnable command and its expected output
 - Format: `Run: <exact shell command in project directory>` → `Expected: <exact output, exit code, or observable behavior>`
@@ -188,7 +233,7 @@ None | Requires task 001 | Requires tasks 001, 002
   - `Run: python -c "from src.db import get_session; print('ok')"` → `Expected: ok`
 - Do NOT write criteria like "function exists" or "code is correct" — those are not verifiable
 
-### 4. Insert Integration Tasks
+### 5. Insert Integration Tasks
 
 When designing a downstream task whose `## Consumes` would list 3 or more entries, insert an integration task before it instead:
 
@@ -215,7 +260,7 @@ Example for a full-stack app:
 - `006`–`012` build API routes, auth, middleware (depend on 005, not 001–004 individually)
 - `013-integration-api-layer.md` smoke-tests the full API (depends on 006–012)
 
-### 5. Verify the Dependency Graph
+### 6. Verify the Dependency Graph
 
 Before finalizing, audit every task's `## Dependencies`:
 
@@ -225,7 +270,7 @@ Before finalizing, audit every task's `## Dependencies`:
 
 **c) Verify parallelism.** After removing spurious dependencies, count how many tasks at each "depth level" of the graph can run in parallel. If nearly all tasks form a single chain, you have a bottleneck — reconsider whether those serial dependencies are truly required.
 
-### 6. Update PROGRESS.md
+### 7. Update PROGRESS.md
 
 ```markdown
 # Progress
@@ -243,7 +288,7 @@ Before finalizing, audit every task's `## Dependencies`:
 [Any important context for workers]
 ```
 
-### 7. Commit and Push
+### 8. Commit and Push
 
 ```bash
 git add -A
