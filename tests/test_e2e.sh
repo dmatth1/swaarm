@@ -53,9 +53,12 @@ sync() {
 
 # Override teardown to handle git's read-only object files
 teardown_e2e() {
+    # Kill any background worker processes from this test
+    jobs -p 2>/dev/null | xargs kill 2>/dev/null || true
+    wait 2>/dev/null || true
     if [[ -n "$TEST_TMPDIR" && -d "$TEST_TMPDIR" ]]; then
         chmod -R u+w "$TEST_TMPDIR" 2>/dev/null || true
-        rm -rf "$TEST_TMPDIR"
+        rm -rf "$TEST_TMPDIR" 2>/dev/null || true
     fi
     TEST_TMPDIR=""
 }
@@ -699,6 +702,238 @@ else
     fail "PerformanceEngineer not called"
     fail "QAEngineer not called"
 fi
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 9: Pre-flight specialist sweep runs after orchestrator ──────────────
+
+setup_test "e2e: new run — pre-flight specialist sweep after orchestrator"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# Push SPEC.md with specialists (needed for sweep to find them)
+push_file_to_repo "SPEC.md" "$(cat <<'SPECEOF'
+# Test Spec
+## Success Criteria
+- [ ] pass
+## Specialists
+### SecurityExpert
+Review code
+### QAEngineer
+Check tests
+SPECEOF
+)" "add spec"
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+pause_workers()                  { :; }
+unpause_workers()                { :; }
+wait_for_active_drain()          { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+QUIET_PERIOD_INTERVAL=999
+MAX_WORKER_ITERATIONS=5
+
+# Remove tasks dir so main() treats this as a NEW run, not resume
+rm -rf "$MAIN_DIR/tasks"
+
+# init_workspace: re-create tasks dirs (normally done by real init_workspace)
+init_workspace() {
+    mkdir -p "$MAIN_DIR/tasks/pending" "$MAIN_DIR/tasks/active" "$MAIN_DIR/tasks/done"
+    touch "$MAIN_DIR/tasks/pending/.gitkeep" "$MAIN_DIR/tasks/active/.gitkeep" "$MAIN_DIR/tasks/done/.gitkeep"
+}
+
+# Orchestrator: create tasks directly (entrypoint hardcodes /upstream)
+docker_run_orchestrator() {
+    push_file_to_repo "tasks/pending/001-setup.md" "# Task 001\n## Dependencies\nNone" "orch: task 001"
+    return 0
+}
+
+# Workers complete tasks
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-preflight-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="5" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+# Reviewer
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    sync
+    local p=$(count_md "$MAIN_DIR/tasks/pending")
+    local a=$(count_md "$MAIN_DIR/tasks/active")
+    if [[ "$1" == "--final--" && "$p" -eq 0 && "$a" -eq 0 ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+# Track specialist sweeps
+SWEEP_LABELS=()
+SWEEP_SPECIALIST_FILE="$TEST_TMPDIR/sweep_specialists"
+docker_run_specialist() {
+    echo "$1" >> "$SWEEP_SPECIALIST_FILE"
+}
+# Override run_specialist_sweep to track labels but still call real implementation
+_real_run_specialist_sweep=$(declare -f run_specialist_sweep)
+run_specialist_sweep() {
+    SWEEP_LABELS+=("$1")
+    # Call the real function (needs docker_run_specialist mock above)
+    eval "$_real_run_specialist_sweep"
+    run_specialist_sweep "$@"
+}
+
+# Actually, simpler approach: just track sweep labels
+run_specialist_sweep() {
+    SWEEP_LABELS+=("$1")
+}
+
+TASK="build the app"
+NUM_AGENTS=1
+main 2>/dev/null || true
+
+# Verify pre-flight sweep ran
+found_preflight=false
+for label in "${SWEEP_LABELS[@]+"${SWEEP_LABELS[@]}"}"; do
+    if [[ "$label" == "pre-flight" ]]; then
+        found_preflight=true
+        break
+    fi
+done
+[[ "$found_preflight" == "true" ]] \
+    && pass "pre-flight specialist sweep ran after orchestrator" \
+    || fail "no pre-flight sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
+
+# Verify sweep happened before workers (pre-flight should be first label)
+if [[ "${#SWEEP_LABELS[@]}" -ge 1 ]]; then
+    [[ "${SWEEP_LABELS[0]}" == "pre-flight" ]] \
+        && pass "pre-flight was first sweep (before workers)" \
+        || fail "first sweep was '${SWEEP_LABELS[0]}', expected pre-flight"
+else
+    fail "no sweeps recorded at all"
+fi
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 10: Quiet period sweep fires every N completions ────────────────────
+
+setup_test "e2e: quiet period — specialist sweep fires after N task completions"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# Push SPEC.md with specialists
+push_file_to_repo "SPEC.md" "$(cat <<'SPECEOF'
+# Test Spec
+## Success Criteria
+- [ ] pass
+## Specialists
+### SecurityExpert
+Review code
+SPECEOF
+)" "add spec"
+
+# Create 4 pending tasks (quiet period at interval=3 should trigger once)
+for i in 1 2 3 4; do
+    padded=$(printf '%03d' $i)
+    push_file_to_repo "tasks/pending/${padded}-task.md" "# Task $padded\n## Dependencies\nNone" "add $padded"
+done
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+QUIET_PERIOD_INTERVAL=3
+MAX_WORKER_ITERATIONS=20
+
+# Workers
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-qp-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="10" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+# Reviewer
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    sync
+    local p=$(count_md "$MAIN_DIR/tasks/pending")
+    local a=$(count_md "$MAIN_DIR/tasks/active")
+    if [[ "$1" == "--final--" && "$p" -eq 0 && "$a" -eq 0 ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+# Track sweep labels AND pause/unpause
+SWEEP_LABELS=()
+PAUSE_CALLS=0
+UNPAUSE_CALLS=0
+run_specialist_sweep() { SWEEP_LABELS+=("$1"); }
+pause_workers()        { PAUSE_CALLS=$((PAUSE_CALLS + 1)); }
+unpause_workers()      { UNPAUSE_CALLS=$((UNPAUSE_CALLS + 1)); }
+wait_for_active_drain() { :; }
+
+run_with_review 1
+
+# Verify quiet period fired (at 3 completions)
+found_qp=false
+for label in "${SWEEP_LABELS[@]+"${SWEEP_LABELS[@]}"}"; do
+    if [[ "$label" == *"quiet-period"* ]]; then
+        found_qp=true
+        break
+    fi
+done
+[[ "$found_qp" == "true" ]] \
+    && pass "quiet-period specialist sweep fired after N completions" \
+    || fail "no quiet-period sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
+
+[[ "$PAUSE_CALLS" -ge 1 ]] \
+    && pass "workers paused during quiet period ($PAUSE_CALLS)" \
+    || fail "workers not paused"
+
+[[ "$UNPAUSE_CALLS" -ge 1 ]] \
+    && pass "workers resumed after quiet period ($UNPAUSE_CALLS)" \
+    || fail "workers not resumed"
+
+# Verify final sweep also ran
+found_final=false
+for label in "${SWEEP_LABELS[@]+"${SWEEP_LABELS[@]}"}"; do
+    if [[ "$label" == "final" ]]; then
+        found_final=true
+        break
+    fi
+done
+[[ "$found_final" == "true" ]] \
+    && pass "final specialist sweep ran before ALL_COMPLETE" \
+    || fail "no final sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
 
 teardown_e2e
 trap - EXIT
