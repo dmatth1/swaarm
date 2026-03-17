@@ -20,7 +20,7 @@ Output directory created per run:
 swarm-TIMESTAMP/
   repo.git/              ← Bare git repo (coordination hub)
   main/                  ← Read-only synced clone for observation
-    SPEC.md / PROGRESS.md
+    SPEC.md / CLAUDE.md / PROGRESS.md
     tasks/pending|active|done/
     [project files]
   logs/orchestrator.log, worker-N.log
@@ -30,7 +30,7 @@ swarm-TIMESTAMP/
 
 ## How It Works
 
-**Phase 1 — Orchestrator**: writes `SPEC.md`, creates `tasks/pending/NNN-name.md` (numbered by dependency order), commits and pushes. Key rules:
+**Phase 1 — Orchestrator**: writes `SPEC.md`, writes `CLAUDE.md` (living project index for worker orientation), creates `tasks/pending/NNN-name.md` (numbered by dependency order), commits and pushes. Key rules:
 - Acceptance criteria must be `Run: <cmd>` → `Expected: <output>` format — no vague criteria
 - `## Interfaces` subsections capped at 25 lines (split into `NameCore`/`NameDetails` if larger)
 - Mandatory `001-project-setup.md` and final `NNN-testing-and-verification.md`
@@ -39,7 +39,7 @@ swarm-TIMESTAMP/
 
 **Phase 2 — Worker loop**: bash harness calls `claude` repeatedly per worker (stateless sessions). Each invocation: pulls, reads state, claims one task, does work, pushes, emits a signal word.
 
-**Phase 3 — Reviewer loop** (`run_with_review` mode): a reviewer agent runs after task completions, checks implementation against SPEC.md interfaces, runs the test suite (Python/Node/Go auto-detected), and adds fix tasks if tests fail. Signals `ALL_COMPLETE` only when pending is empty, active is empty, and tests pass.
+**Phase 3 — Reviewer loop** (`run_with_review` mode): a reviewer agent runs after task completions, checks implementation against SPEC.md interfaces, runs the test suite (Python/Node/Go auto-detected), updates `CLAUDE.md` with new files/patterns, updates `## Relevant Files` on pending tasks, and adds fix tasks if tests fail. Signals `ALL_COMPLETE` only when pending is empty, active is empty, and tests pass.
 
 **Task state machine**: `pending/NNN-task.md` → `active/worker-N--NNN-task.md` → `done/NNN-task.md`
 
@@ -81,7 +81,8 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 ## Key Design Decisions
 
-- **Stateless invocations**: agents re-read `SPEC.md` and task queue every call; state is only in git
+- **CLAUDE.md as project index**: orchestrator creates it; reviewer updates it after each task; workers get it auto-loaded by Claude Code. Kept under 200 lines. Orientation (structure, stack, build commands) lives here; contracts (interfaces, criteria) stay in SPEC.md
+- **Stateless invocations**: agents re-read `CLAUDE.md` (auto) + `SPEC.md` and task queue every call; state is only in git
 - **`.gitkeep` files**: keeps `tasks/active/` and `tasks/done/` tracked by git when empty
 - **`set -euo pipefail`**: use `var=$((var + 1))` not `((var++))`, use `if`/`then` not `[[ ]] && cmd`
 - **Rate-limit backoff**: workers detect rate-limit output from claude (429, "too many requests", "quota exceeded", account-level "hit your limit / resets UTC") and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`

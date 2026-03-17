@@ -14,9 +14,12 @@ You are working in a git repository shared by multiple agents running in paralle
 tasks/pending/   ← unclaimed tasks (pick from here)
 tasks/active/    ← tasks being worked on (yours will be here while working)
 tasks/done/      ← completed tasks
-SPEC.md          ← project specification
+SPEC.md          ← project specification (interfaces, contracts)
+CLAUDE.md        ← project index (structure, stack, build commands — auto-loaded)
 PROGRESS.md      ← overall progress
 ```
+
+**Note:** `CLAUDE.md` is read automatically before you start — it contains the current project structure, tech stack, build commands, and module map. You do not need to read it explicitly.
 
 ---
 

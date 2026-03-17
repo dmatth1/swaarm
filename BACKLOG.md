@@ -4,13 +4,6 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
-### Use CLAUDE.md as a living project index to reduce worker orientation cost
-Every worker invocation starts cold — re-reads SPEC.md, scans the task queue, explores the codebase. As projects grow past 15-20 tasks, workers spend significant tokens just getting oriented. Claude Code already reads `CLAUDE.md` automatically on every invocation, so use it as the project index.
-- [ ] Orchestrator creates an initial `CLAUDE.md` alongside SPEC.md (project structure, tech stack, key interfaces, file layout)
-- [ ] Reviewer updates `CLAUDE.md` after each task completion (new files, changed interfaces, architectural decisions made by workers)
-- [ ] Keep `CLAUDE.md` under 200 lines — compact when it grows, preserving only current state (not history)
-- [ ] Update orchestrator and reviewer prompts accordingly
-
 ### Worker logs don't stream during claude session
 **Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
 Worker logs show the startup header (`Worker N started`, `State: pending=X`) but then go silent for 15-30 minutes until the claude session completes and dumps all output at once. Root cause: `claude -p` detects stdout is a pipe and block-buffers (Node.js default for non-TTY stdout). `tee -a` only helps if the upstream process writes incrementally.
@@ -109,3 +102,10 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Worker prompt adds Step 6: Load Relevant Files between claim and interface loading
 - [x] Reviewer updates `## Relevant Files` on pending tasks after each completion
 - [x] Framed as hints, not hard constraints — workers can explore beyond the list if needed
+
+### Use CLAUDE.md as a living project index to reduce worker orientation cost
+- [x] Orchestrator creates initial `CLAUDE.md` alongside SPEC.md (step 3 in prompt): project structure, tech stack, build commands, module map
+- [x] Reviewer updates `CLAUDE.md` after each task completion (step 6 in prompt): new files, changed patterns, updated structure
+- [x] 200-line cap enforced in both prompts — reviewer compacts when it grows
+- [x] Worker prompt notes CLAUDE.md is auto-loaded by Claude Code — no explicit read needed
+- [x] Clear separation: CLAUDE.md = orientation (what exists, how to build), SPEC.md = contracts (interfaces, criteria)
