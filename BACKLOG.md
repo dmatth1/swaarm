@@ -106,7 +106,7 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Test was in `test_inject.sh` (deleted with inject deprecation) — test coverage lost, covered by code audit
 
 ### Periodic orchestrator + specialist sweeps
-- [x] Every N completions (default 10, `RESTRUCTURE_INTERVAL`), orchestrator runs in augment mode + specialist sweep concurrently with workers
+- [x] Every N completions (default 6, `RESTRUCTURE_INTERVAL`), orchestrator runs in augment mode + specialist sweep concurrently with workers
 - [x] Orchestrator handles: BLOCKED tasks, stale pending task manifests, CLAUDE.md/SPEC.md updates, test failures, gaps
 - [x] Reviewer simplified to pure test runner (TESTS_PASS/TESTS_FAIL only) — no restructuring powers
 - [x] TESTS_FAIL from reviewer triggers orchestrator immediately (doesn't wait for next interval)

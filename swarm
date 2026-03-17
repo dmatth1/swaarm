@@ -763,7 +763,7 @@ run_with_review() {
     local stuck_cycles=0
     local max_stuck_cycles=3
     local last_restructure_at=0
-    local restructure_interval="${RESTRUCTURE_INTERVAL:-10}"
+    local restructure_interval="${RESTRUCTURE_INTERVAL:-6}"
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
