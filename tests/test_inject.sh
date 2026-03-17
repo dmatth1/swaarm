@@ -116,4 +116,31 @@ echo "$output" | grep -q "guidance" \
 teardown_test
 trap - EXIT
 
+# ─── Test 5: octal-safe numbering with zero-padded task numbers ──────────────
+
+setup_test "inject: handles zero-padded task numbers 008/009 (octal-safe)"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/done/007-feature-a.md" "# Task 007" "done 007"
+push_file_to_repo "tasks/done/008-feature-b.md" "# Task 008" "done 008"
+push_file_to_repo "tasks/done/009-feature-c.md" "# Task 009" "done 009"
+push_file_to_repo "tasks/pending/018-feature-d.md" "# Task 018" "add 018"
+push_file_to_repo "tasks/pending/019-feature-e.md" "# Task 019" "add 019"
+
+load_swarm
+
+CAPTURED_NEXT_NUM=""
+ensure_docker_image() { :; }
+docker_run_inject() {
+    CAPTURED_NEXT_NUM="$2"
+}
+
+cmd_inject "$OUTPUT_DIR" "Add more features"
+
+assert_eq "20" "$CAPTURED_NEXT_NUM" "next_num is 20 (after max 019, octal-safe)"
+
+teardown_test
+trap - EXIT
+
 print_summary

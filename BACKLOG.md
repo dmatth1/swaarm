@@ -31,12 +31,6 @@ The reviewer checks if code compiles and unit tests pass, but does not verify th
 - [ ] If required artifacts are missing, reviewer should create a fix task or reject the completion
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering artifact compliance check
 
-### Octal parsing bug with zero-padded task numbers
-**Bug** · `swarm:458,474`
-Bash interprets zero-padded numbers like `008`, `009`, `018` as invalid octal in `[[ ]]` comparisons. Fixed in two places with `$((10#$num))` but should audit all task-number parsing throughout the script.
-- [ ] Audit all `grep -o '^[0-9]*'` → `[[ ]]` patterns for octal safety
-- [ ] Add test covering task numbers 008, 009, 018, 019, etc.
-
 ## P2 — Should fix
 
 ### cmd_kill has no tests
@@ -109,3 +103,7 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] 200-line cap enforced in both prompts — reviewer compacts when it grows
 - [x] Worker prompt notes CLAUDE.md is auto-loaded by Claude Code — no explicit read needed
 - [x] Clear separation: CLAUDE.md = orientation (what exists, how to build), SPEC.md = contracts (interfaces, criteria)
+
+### Octal parsing bug with zero-padded task numbers
+- [x] Audited all 3 `grep -o '^[0-9]*'` → `[[ ]]` patterns — all use `$((10#$num))`
+- [x] Test: `tests/test_inject.sh` test 5 covers task numbers 008, 009, 018, 019
