@@ -18,6 +18,30 @@ if [[ -n "${MODEL:-}" ]]; then
     CLAUDE_MODEL_FLAG="--model $MODEL"
 fi
 
+# Security notice for public repos — prepended to all prompts when set
+SECURITY_NOTICE=""
+if [[ "${PUBLIC_REPO:-false}" == "true" ]]; then
+    SECURITY_NOTICE="
+## SECURITY — PUBLIC REPOSITORY
+
+This project is pushed to a **public** GitHub repository. All commits are visible to anyone.
+
+**You MUST NOT commit any of the following:**
+- API keys, tokens, passwords, or secrets of any kind
+- Private keys, certificates, or credentials
+- Personally identifiable information (PII)
+- Internal URLs, IP addresses, or infrastructure details
+- .env files or any file containing secrets
+
+**Use placeholder values** (e.g. \`YOUR_API_KEY_HERE\`, \`localhost\`) in code and config files.
+**Add a .gitignore** that excludes .env, credentials files, and other secret-bearing paths.
+If a task requires secrets, create a .env.example with placeholder keys and document the setup.
+
+---
+
+"
+fi
+
 # ─────────────────────────────────────────────────────────────
 # ORCHESTRATOR MODE
 # ─────────────────────────────────────────────────────────────
@@ -45,6 +69,8 @@ run_orchestrator() {
         if ($0 ~ /\{\{TASK\}\}/) { gsub(/\{\{TASK\}\}/, ""); print task }
         else { print }
     }' /prompts/orchestrator.md)
+
+    prompt="${SECURITY_NOTICE}${prompt}"
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
@@ -85,6 +111,8 @@ run_inject() {
         else { print }
     }' "${PROMPTS_DIR:-/prompts}/inject.md")
 
+    prompt="${SECURITY_NOTICE}${prompt}"
+
     echo "Inject agent adding tasks for: $guidance" >> "$log_file"
 
     # Always tee to log for real-time streaming via tail -f
@@ -115,6 +143,7 @@ run_reviewer() {
     prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
                  /prompts/reviewer.md)
+    prompt="${SECURITY_NOTICE}${prompt}"
 
     # Always tee to log for real-time streaming via tail -f
     output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
@@ -154,6 +183,7 @@ run_specialist() {
             print
         }
     }')
+    prompt="${SECURITY_NOTICE}${prompt}"
 
     # Always tee to log for real-time streaming via tail -f
     output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
@@ -189,6 +219,7 @@ run_worker() {
     # Prepare prompt
     local prompt
     prompt=$(sed "s|{{AGENT_ID}}|${worker_name}|g" "${PROMPTS_DIR:-/prompts}/worker.md")
+    prompt="${SECURITY_NOTICE}${prompt}"
 
     local iteration=0
     local rate_limit_attempts=0

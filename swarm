@@ -29,6 +29,7 @@ VERBOSE=false
 MAX_WORKER_ITERATIONS=100
 DOCKER_IMAGE="swarm-agent"
 MODEL=""
+REMOTE_REPO=""  # GitHub URL — if set, repo.git mirrors to this remote
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
 
@@ -48,6 +49,7 @@ Options:
   -v, --verbose         Show agent output in real-time
   --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --model MODEL         Claude model to use (e.g. opus, sonnet, opus[1m])
+  --repo URL            Push to a remote GitHub repo (e.g. https://github.com/user/repo)
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   -h, --help            Show this help
 
@@ -301,9 +303,10 @@ cmd_resume() {
     local output_dir="${1:-}"
     local override_agents="${2:-}"
     local override_model="${3:-}"
+    local override_repo="${4:-}"
 
     if [[ -z "$output_dir" ]]; then
-        error "Usage: swarm resume <output-dir> [-n N] [--model M]"
+        error "Usage: swarm resume <output-dir> [-n N] [--model M] [--repo URL]"
         exit 1
     fi
     if [[ ! -d "$output_dir/main/tasks" ]]; then
@@ -323,11 +326,18 @@ cmd_resume() {
 
     local agents="${override_agents:-$SWARM_AGENTS}"
     MODEL="${override_model:-${SWARM_MODEL:-}}"
+    REMOTE_REPO="${override_repo:-${SWARM_REPO:-}}"
 
     OUTPUT_DIR="$(cd "$output_dir" && pwd)"
     REPO_DIR="$OUTPUT_DIR/repo.git"
     LOGS_DIR="$OUTPUT_DIR/logs"
     MAIN_DIR="$OUTPUT_DIR/main"
+
+    # Ensure github remote is configured if --repo was provided (new or resumed)
+    if [[ -n "$REMOTE_REPO" && -d "$REPO_DIR" ]]; then
+        (cd "$REPO_DIR" && git remote get-url github 2>/dev/null) || \
+            (cd "$REPO_DIR" && git remote add github "$REMOTE_REPO") || true
+    fi
 
     echo
     echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
@@ -337,6 +347,7 @@ cmd_resume() {
     info "Task:   $SWARM_TASK"
     info "Agents: $agents"
     [[ -n "$MODEL" ]] && info "Model:  $MODEL"
+    [[ -n "$REMOTE_REPO" ]] && info "Repo:   $REMOTE_REPO"
     info "Output: $OUTPUT_DIR"
     echo
 
@@ -535,6 +546,7 @@ docker_run_orchestrator() {
         -e TASK="$TASK" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
+        ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         orchestrator || true
 
@@ -588,6 +600,7 @@ docker_run_inject() {
         -e NEXT_TASK_NUM="$next_task_num" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
+        ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         inject || true
 
@@ -628,6 +641,7 @@ docker_run_worker() {
         -e MAX_WORKER_ITERATIONS="$MAX_WORKER_ITERATIONS" \
         -e MULTI_ROUND=true \
         ${MODEL:+-e MODEL="$MODEL"} \
+        ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         worker "$agent_id" > /dev/null
 
@@ -658,6 +672,7 @@ docker_run_reviewer() {
         -e REVIEW_NUM="$review_num" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
+        ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         reviewer || true
 }
@@ -686,6 +701,7 @@ docker_run_specialist() {
         -e SPECIALIST_NUM="$specialist_num" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
+        ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         specialist || true
 }
@@ -1013,6 +1029,13 @@ count_files() {
 
 sync_main() {
     (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+    sync_remote
+}
+
+# Push local bare repo to remote GitHub repo (no-op if --repo not set)
+sync_remote() {
+    [[ -z "$REMOTE_REPO" ]] && return 0
+    (cd "$REPO_DIR" && git push github --all -q 2>/dev/null) || true
 }
 
 pending_count() { count_files "$MAIN_DIR/tasks/pending"; }
@@ -1025,10 +1048,24 @@ done_count()    { count_files "$MAIN_DIR/tasks/done"; }
 
 init_workspace() {
     log "Creating workspace: $OUTPUT_DIR"
-    mkdir -p "$REPO_DIR" "$LOGS_DIR"
+    mkdir -p "$LOGS_DIR"
 
-    # Init bare repo (shared coordination point)
-    git init --bare "$REPO_DIR" -q
+    if [[ -n "$REMOTE_REPO" ]]; then
+        # Clone remote repo as local bare mirror for fast coordination
+        log "Cloning remote repo: $REMOTE_REPO"
+        git clone --bare "$REMOTE_REPO" "$REPO_DIR" -q 2>/dev/null || {
+            # Remote may be empty — init locally and add remote
+            mkdir -p "$REPO_DIR"
+            git init --bare "$REPO_DIR" -q
+            (cd "$REPO_DIR" && git remote add github "$REMOTE_REPO")
+        }
+        # Ensure github remote is set (clone --bare names it 'origin')
+        (cd "$REPO_DIR" && git remote get-url github 2>/dev/null) || \
+            (cd "$REPO_DIR" && git remote add github "$REMOTE_REPO") || true
+    else
+        mkdir -p "$REPO_DIR"
+        git init --bare "$REPO_DIR" -q
+    fi
 
     # Bootstrap with initial structure
     local bootstrap_dir
@@ -1067,6 +1104,9 @@ PROGEOF
     )
 
     rm -rf "$bootstrap_dir"
+
+    # Push bootstrap to remote
+    sync_remote
 
     # Clone the "main" view (read results here)
     git clone "$REPO_DIR" "$MAIN_DIR" -q 2>/dev/null
@@ -1110,6 +1150,7 @@ main() {
     info "Task:   $TASK"
     info "Agents: $NUM_AGENTS"
     [[ -n "$MODEL" ]] && info "Model:  $MODEL"
+    [[ -n "$REMOTE_REPO" ]] && info "Repo:   $REMOTE_REPO"
     info "Output: $OUTPUT_DIR"
     echo
 
@@ -1142,6 +1183,7 @@ main() {
         printf 'SWARM_TASK=%q\n' "$TASK"
         printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
         printf 'SWARM_MODEL=%q\n' "$MODEL"
+        printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
         printf 'SWARM_STARTED="%s"\n' "$(date)"
     } > "$OUTPUT_DIR/swarm.state"
 
@@ -1234,15 +1276,17 @@ case "${1:-}" in
         output_dir="${1:-}"
         override_agents=""
         override_model=""
+        override_repo=""
         shift 2>/dev/null || true
         while [[ $# -gt 0 ]]; do
             case $1 in
                 -n|--agents) override_agents="$2"; shift 2 ;;
                 --model) override_model="$2"; shift 2 ;;
+                --repo) override_repo="$2"; shift 2 ;;
                 *) shift ;;
             esac
         done
-        cmd_resume "$output_dir" "$override_agents" "$override_model"
+        cmd_resume "$output_dir" "$override_agents" "$override_model" "$override_repo"
         exit 0
         ;;
     inject)
@@ -1263,6 +1307,7 @@ while [[ $# -gt 0 ]]; do
         -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
         -v|--verbose)       VERBOSE=true; shift ;;
         --model)            MODEL="$2"; shift 2 ;;
+        --repo)             REMOTE_REPO="$2"; shift 2 ;;
         --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         -h|--help)      usage; exit 0 ;;

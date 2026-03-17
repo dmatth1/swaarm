@@ -75,6 +75,7 @@ Options:
   -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
   -v, --verbose     Show agent output in terminal (logs always stream to files)
   --model MODEL     Claude model to use (e.g. opus, sonnet, opus[1m])
+  --repo URL        Push to a remote GitHub repo (keeps local coordination fast)
   -h, --help        Show help
 ```
 
@@ -117,6 +118,8 @@ Options:
 ./swarm "Build a static site generator that converts Markdown to HTML with Jinja2 templates"
 
 ./swarm "Build a real-time chat server" --model opus --agents 4
+
+./swarm "Build a REST API" --repo https://github.com/user/my-api
 ```
 
 ## Output structure
@@ -200,6 +203,21 @@ While a swarm is paused (or after it finishes), you can add new tasks based on a
 ```
 
 The inject agent reads the existing SPEC.md and task history, then creates new numbered task files in `tasks/pending/` that pick up where the existing numbering left off. Run `./swarm resume <dir>` afterward to start workers on the new tasks.
+
+## Pushing to GitHub
+
+Use `--repo` to mirror all progress to a remote GitHub repository:
+
+```bash
+./swarm "Build a REST API" --repo https://github.com/user/my-api
+
+# Or add a remote to an existing run
+./swarm resume ./swarm-20240115-143022 --repo https://github.com/user/my-api
+```
+
+Workers still coordinate through the local bare repo (fast, no network latency on task claims). The harness pushes to GitHub after each status sync, so the remote stays up to date.
+
+When `--repo` is set, all agents receive a security notice prohibiting commits of API keys, passwords, PII, or other secrets — since the repo may be public.
 
 ## Killing agents
 
