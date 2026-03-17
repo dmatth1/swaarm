@@ -120,7 +120,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 ## Testing
 
-Run all tests: `for f in tests/test_*.sh; do bash "$f"; done`
+Run all tests: `bash tests/run_tests.sh` (~34s parallel)
 
 Tests mock the Claude CLI (no API tokens). E2E tests (`test_e2e.sh`) use a mock claude that performs real git operations (claim tasks, create files, push commits). All other tests mock at the harness level (override `docker_run_*` functions via `load_swarm`).
 
