@@ -1307,6 +1307,12 @@ main() {
             log "New tasks start at $(printf '%03d' "$next_num")"
             docker_run_inject "$TASK" "$next_num"
             (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+            # Specialist sweep after inject — validate new tasks
+            _g_specialist_count=0
+            run_specialist_sweep "post-inject"
+            sync_main
+            echo
         fi
 
         local pending done_n
