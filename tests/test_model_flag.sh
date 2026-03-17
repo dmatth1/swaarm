@@ -20,7 +20,7 @@ init_model_workspace() {
     local prompts_dir="$TEST_TMPDIR/prompts"
     init_mock_prompts "$prompts_dir"
     printf 'Test worker prompt for {{AGENT_ID}}\n' > "$prompts_dir/worker.md"
-    printf 'Inject prompt: {{GUIDANCE}} starting at {{NEXT_TASK_NUM}}\n' > "$prompts_dir/inject.md"
+    printf 'Orchestrator prompt: {{TASK}} next={{NEXT_TASK_NUM}}\n' > "$prompts_dir/orchestrator.md"
     PROMPTS_DIR="$prompts_dir"
 }
 
@@ -105,9 +105,9 @@ fi
 teardown_test
 trap - EXIT
 
-# ─── Test 3: Inject passes --model to claude ──────────────────────────────────
+# ─── Test 3: Orchestrator augment passes --model to claude ────────────────────
 
-setup_test "model: inject passes --model to claude CLI"
+setup_test "model: orchestrator augment passes --model to claude CLI"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -115,21 +115,21 @@ init_model_workspace
 setup_claude_mock
 
 MODEL="sonnet" \
-GUIDANCE="add tests" \
+TASK="add tests" \
 NEXT_TASK_NUM="1" \
 LOGS_DIR="$TEST_LOGS" \
 UPSTREAM_DIR="$REPO_DIR" \
 WORKSPACE_DIR="$TEST_TMPDIR/workspace3" \
 PROMPTS_DIR="$PROMPTS_DIR" \
 PATH="$MOCK_BIN:$PATH" \
-    bash "$ENTRYPOINT" inject 2>/dev/null || true
+    bash "$ENTRYPOINT" orchestrator 2>/dev/null || true
 
 args_file="$MOCK_BIN/claude_args"
 assert_file_exists "$args_file" "claude was called"
 
 grep -q "\-\-model sonnet" "$args_file" \
-    && pass "inject claude called with --model sonnet" \
-    || fail "inject claude args missing --model sonnet (got: $(cat "$args_file"))"
+    && pass "orchestrator augment claude called with --model sonnet" \
+    || fail "orchestrator augment claude args missing --model sonnet (got: $(cat "$args_file"))"
 
 teardown_test
 trap - EXIT
@@ -235,9 +235,9 @@ trap teardown_test EXIT
 
 # All roles must call run_claude (which uses CLAUDE_MODEL_FLAG internally)
 role_calls=$(grep -c 'run_claude "\$prompt"' "$ENTRYPOINT" 2>/dev/null) || role_calls=0
-[[ "$role_calls" -ge 5 ]] \
-    && pass "all 5 roles call run_claude which passes CLAUDE_MODEL_FLAG ($role_calls calls)" \
-    || fail "expected at least 5 run_claude calls, found $role_calls"
+[[ "$role_calls" -ge 4 ]] \
+    && pass "all 4 roles call run_claude which passes CLAUDE_MODEL_FLAG ($role_calls calls)" \
+    || fail "expected at least 4 run_claude calls, found $role_calls"
 
 # Verify run_claude uses CLAUDE_MODEL_FLAG
 grep -q 'CLAUDE_MODEL_FLAG' "$ENTRYPOINT" \

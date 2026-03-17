@@ -13,13 +13,13 @@ setup_main_mocks() {
     cleanup_docker()             { :; }
     docker_run_orchestrator()    {
         ORCHESTRATOR_CALLED=true
+        ORCHESTRATOR_NEXT_NUM="${1:-}"
         # Create a dummy done task so main() doesn't exit with "no tasks completed"
         mkdir -p "$MAIN_DIR/tasks/done"
         echo "# dummy" > "$MAIN_DIR/tasks/done/001-setup.md"
         return 0
     }
     docker_run_worker()          { :; }
-    docker_run_inject()          { INJECT_CALLED=true; INJECT_GUIDANCE="$1"; INJECT_NEXT="$2"; }
     docker_run_reviewer()        {
         mkdir -p "$LOGS_DIR"
         echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
@@ -43,9 +43,7 @@ setup_main_mocks() {
     }
 
     ORCHESTRATOR_CALLED=false
-    INJECT_CALLED=false
-    INJECT_GUIDANCE=""
-    INJECT_NEXT=""
+    ORCHESTRATOR_NEXT_NUM=""
     RWR_CALLED=false
     RWR_AGENTS=""
     INIT_WORKSPACE_CALLED=false
@@ -80,9 +78,9 @@ main 2>/dev/null || true
     && pass "run_with_review called" \
     || fail "run_with_review not called"
 
-[[ "$INJECT_CALLED" == "false" ]] \
-    && pass "inject not called for new run" \
-    || fail "inject should not be called for new run"
+[[ -z "$ORCHESTRATOR_NEXT_NUM" ]] \
+    && pass "orchestrator called in new-project mode (no NEXT_NUM)" \
+    || fail "orchestrator should not have NEXT_NUM for new run"
 
 teardown_test
 trap - EXIT
@@ -119,9 +117,9 @@ main 2>/dev/null || true
     && pass "orchestrator NOT called for resume" \
     || fail "orchestrator should not be called for resume"
 
-[[ "$INJECT_CALLED" == "false" ]] \
-    && pass "inject NOT called when prompt matches original" \
-    || fail "inject should not be called when prompt matches"
+[[ "$ORCHESTRATOR_CALLED" == "false" ]] \
+    && pass "orchestrator NOT called when prompt matches original" \
+    || fail "orchestrator should not be called when prompt matches"
 
 [[ "$RWR_CALLED" == "true" ]] \
     && pass "run_with_review called for resume" \
@@ -130,9 +128,9 @@ main 2>/dev/null || true
 teardown_test
 trap - EXIT
 
-# ─── Test 3: Resume — existing dir, different prompt → inject ─────────────────
+# ─── Test 3: Resume — existing dir, different prompt → orchestrator augment ───
 
-setup_test "unified: resume with new guidance triggers inject"
+setup_test "unified: resume with new guidance triggers orchestrator augment"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -154,18 +152,16 @@ NUM_AGENTS=3
 
 main 2>/dev/null || true
 
-[[ "$INJECT_CALLED" == "true" ]] \
-    && pass "inject called when prompt differs from original" \
-    || fail "inject should be called when prompt changes"
-
-assert_eq "Also add rate limiting" "$INJECT_GUIDANCE" "inject received new guidance"
+[[ "$ORCHESTRATOR_CALLED" == "true" ]] \
+    && pass "orchestrator called when prompt differs from original" \
+    || fail "orchestrator should be called when prompt changes"
 
 # next_num should be 3 (max is 002 → next is 3)
-assert_eq "3" "$INJECT_NEXT" "inject starts at task 003"
+assert_eq "3" "$ORCHESTRATOR_NEXT_NUM" "orchestrator augment starts at task 003"
 
 [[ "$RWR_CALLED" == "true" ]] \
-    && pass "run_with_review called after inject" \
-    || fail "run_with_review not called after inject"
+    && pass "run_with_review called after augment" \
+    || fail "run_with_review not called after augment"
 
 teardown_test
 trap - EXIT

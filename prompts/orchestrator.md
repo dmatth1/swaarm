@@ -28,6 +28,18 @@ Directory structure:
 
 ## What You Must Do
 
+### 0. Determine Mode
+
+Check whether this is a **new project** or an **augmentation** of an existing one:
+
+```bash
+ls tasks/done/ tasks/pending/ tasks/active/ 2>/dev/null
+cat SPEC.md 2>/dev/null | head -5
+```
+
+- If `SPEC.md` is a stub or missing and no tasks exist → **new project mode** (do all steps below)
+- If `SPEC.md` has real content and tasks exist → **augment mode** (skip to Step 1A below)
+
 ### 1. Analyze the Task
 
 Think through:
@@ -37,7 +49,24 @@ Think through:
 - What order must things be built in?
 - What can be built in parallel?
 
-### 2. Write SPEC.md
+### 1A. Augment Mode (existing project)
+
+If this is an augment (SPEC.md already exists, tasks already exist):
+
+1. Read `SPEC.md` fully — understand the current architecture, interfaces, and success criteria
+2. Read existing task files (`tasks/done/`, `tasks/pending/`) to understand what's been built and what's queued
+3. **Read the actual source code** — browse project files, tests, configs to understand current state
+4. **Update SPEC.md** — add new interfaces, update success criteria, adjust architecture if the new guidance requires it. Do not remove existing content unless it's being replaced.
+5. **Update CLAUDE.md** — add new modules, update build commands if changed
+6. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
+7. **Update PROGRESS.md** — add new tasks to the list
+8. Commit and push, then signal `ORCHESTRATION COMPLETE`
+
+**Do not** re-create `001-project-setup.md` or `002-test-infrastructure.md` — those already exist. **Do** add a final `NNN-testing-and-verification.md` for the new work if it's substantial.
+
+Skip Steps 2, 3, and 4 below (they are for new projects only). Go directly to Step 5.
+
+### 2. Write SPEC.md (new project only)
 
 Replace the contents of `SPEC.md` with a comprehensive specification. The `## Interfaces` section **must be last**.
 
@@ -115,7 +144,7 @@ The six default specialists above run on every project. Add project-specific spe
 
 Each `### Name` subsection is the specialist's role description — written in second person, specific about what to look for and what to do.
 
-### 3. Write CLAUDE.md
+### 3. Write CLAUDE.md (new project only)
 
 Create `CLAUDE.md` as a living project index. Claude Code reads this file automatically on every worker invocation — it's the fastest way to orient a cold-start agent. Keep it **under 200 lines**.
 
@@ -146,7 +175,7 @@ Create `CLAUDE.md` as a living project index. Claude Code reads this file automa
 
 Do **not** duplicate SPEC.md content — CLAUDE.md is for orientation (what exists, how to build, where things are), SPEC.md is for contracts (interfaces, acceptance criteria). Workers read CLAUDE.md first (automatically), then SPEC.md (on demand).
 
-### 4. Create Task Files
+### 4. Create Task Files (new project only)
 
 Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order. Use the task file format and rules from the **Task Creation Guide** appended below.
 

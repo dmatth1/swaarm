@@ -119,9 +119,9 @@ grep -q 'run_claude' "$ENTRYPOINT" \
 teardown_test
 trap - EXIT
 
-# ─── Test 3: Inject streams claude output to log file ─────────────────────────
+# ─── Test 3: Orchestrator augment streams claude output to log file ────────────
 
-setup_test "streaming: inject claude output appears in log file"
+setup_test "streaming: orchestrator augment claude output appears in log file"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -129,29 +129,29 @@ init_streaming_workspace
 
 local_prompts="$TEST_TMPDIR/prompts"
 init_mock_prompts "$local_prompts"
-printf 'Inject prompt: {{GUIDANCE}} starting at {{NEXT_TASK_NUM}}\n' > "$local_prompts/inject.md"
+printf 'Orchestrator prompt: {{TASK}} next={{NEXT_TASK_NUM}}\n' > "$local_prompts/orchestrator.md"
 
-setup_claude_mock "INJECTION COMPLETE"
+setup_claude_mock "ORCHESTRATION COMPLETE"
 
-GUIDANCE="add tests" \
+TASK="add tests" \
 NEXT_TASK_NUM="1" \
 LOGS_DIR="$TEST_LOGS" \
 UPSTREAM_DIR="$REPO_DIR" \
-WORKSPACE_DIR="$TEST_TMPDIR/workspace-inject" \
+WORKSPACE_DIR="$TEST_TMPDIR/workspace-augment" \
 PROMPTS_DIR="$local_prompts" \
 PATH="$MOCK_BIN:$PATH" \
-    bash "$ENTRYPOINT" inject 2>/dev/null || true
+    bash "$ENTRYPOINT" orchestrator 2>/dev/null || true
 
-log_file="$TEST_LOGS/inject.log"
-assert_file_exists "$log_file" "inject log file created"
+log_file="$TEST_LOGS/orchestrator.log"
+assert_file_exists "$log_file" "orchestrator log file created"
 
 grep -q "LINE_ONE" "$log_file" \
-    && pass "inject log contains LINE_ONE (claude output streamed)" \
-    || fail "inject log missing LINE_ONE"
+    && pass "orchestrator log contains LINE_ONE (claude output streamed)" \
+    || fail "orchestrator log missing LINE_ONE"
 
 grep -q "LINE_TWO" "$log_file" \
-    && pass "inject log contains LINE_TWO" \
-    || fail "inject log missing LINE_TWO"
+    && pass "orchestrator log contains LINE_TWO" \
+    || fail "orchestrator log missing LINE_TWO"
 
 teardown_test
 trap - EXIT
@@ -169,9 +169,9 @@ direct=$(grep -c 'echo.*\$prompt.*|.*claude' "$ENTRYPOINT" 2>/dev/null) || direc
 
 # Verify run_claude is called from each role (5 roles)
 role_calls=$(grep -c 'run_claude "\$prompt"' "$ENTRYPOINT" 2>/dev/null || echo 0)
-[[ "$role_calls" -ge 5 ]] \
-    && pass "all 5 roles call run_claude ($role_calls found)" \
-    || fail "expected at least 5 run_claude calls, found $role_calls"
+[[ "$role_calls" -ge 4 ]] \
+    && pass "all 4 roles call run_claude ($role_calls found)" \
+    || fail "expected at least 4 run_claude calls, found $role_calls"
 
 # Verify run_claude uses script for PTY-based streaming
 grep -q 'script.*claude' "$ENTRYPOINT" \

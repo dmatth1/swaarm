@@ -8,10 +8,10 @@
 swarm                    ← Main CLI script
 Dockerfile               ← Container image (node + python + go + claude CLI)
 docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker modes)
-prompts/orchestrator.md  ← Orchestrator prompt template
+prompts/orchestrator.md  ← Orchestrator prompt template (new + augment modes)
 prompts/worker.md        ← Worker prompt template
 prompts/reviewer.md      ← Reviewer agent prompt template
-prompts/inject.md        ← Inject agent prompt template
+prompts/task-format.md   ← Shared task creation guide (appended to all task-creating agents)
 BACKLOG.md               ← Known bugs, missing tests, and planned features
 ```
 
@@ -66,7 +66,6 @@ swarm-TIMESTAMP/
 | `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator | Task files created |
 | `<promise>REVIEW_DONE</promise>` | Reviewer | Reviewed, work continues |
 | `<promise>ALL_COMPLETE</promise>` | Reviewer | Project done, tests passing |
-| `<promise>INJECTION COMPLETE</promise>` | Inject agent | New tasks created and pushed |
 
 **Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness fires the reviewer with `--stuck--`. The reviewer diagnoses the deadlock (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
 
@@ -95,7 +94,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 ```bash
 ./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--verbose]
-# If -o points to existing run → resume (unstick tasks, inject new guidance, re-spawn workers)
+# If -o points to existing run → resume (unstick tasks, augment via orchestrator if new guidance, re-spawn workers)
 # If -o absent or new dir → new run (orchestrate + workers)
 ./swarm status <output-dir>
 ./swarm kill <output-dir> [agent-id]

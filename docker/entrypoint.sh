@@ -76,7 +76,7 @@ fi
 
 run_orchestrator() {
     local task="${TASK:-}"
-    local log_file="/logs/orchestrator.log"
+    local log_file="${LOGS_DIR:-/logs}/orchestrator.log"
 
     if [[ -z "$task" ]]; then
         echo "ERROR: TASK env var not set" >&2
@@ -86,21 +86,23 @@ run_orchestrator() {
     echo "=== Orchestrator started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone /upstream /workspace -q 2>/dev/null
-    cd /workspace
+    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "orchestrator@swarm"
     git config user.name "Swarm Orchestrator"
 
     # Prepare prompt (awk handles multiline TASK safely; sed breaks on newlines)
+    local next_task_num="${NEXT_TASK_NUM:-}"
     local prompt
-    prompt=$(awk -v task="$task" '{
+    prompt=$(awk -v task="$task" -v next_num="$next_task_num" '{
         if ($0 ~ /\{\{TASK\}\}/) { gsub(/\{\{TASK\}\}/, ""); print task }
+        else if ($0 ~ /\{\{NEXT_TASK_NUM\}\}/) { gsub(/\{\{NEXT_TASK_NUM\}\}/, ""); print next_num }
         else { print }
-    }' /prompts/orchestrator.md)
+    }' "${PROMPTS_DIR:-/prompts}/orchestrator.md")
 
     # Append shared task creation guide
     prompt="${prompt}
-$(cat /prompts/task-format.md)"
+$(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
@@ -109,50 +111,6 @@ $(cat /prompts/task-format.md)"
     rm -f "$CLAUDE_OUTPUT_FILE"
 
     echo "=== Orchestrator finished $(date) ===" >> "$log_file"
-}
-
-# ─────────────────────────────────────────────────────────────
-# INJECT MODE
-# ─────────────────────────────────────────────────────────────
-
-run_inject() {
-    local guidance="${GUIDANCE:-}"
-    local next_task_num="${NEXT_TASK_NUM:-1}"
-    local log_file="${LOGS_DIR:-/logs}/inject.log"
-
-    if [[ -z "$guidance" ]]; then
-        echo "ERROR: GUIDANCE env var not set" >&2
-        exit 1
-    fi
-
-    echo "=== Inject agent started $(date) ===" > "$log_file"
-
-    # Clone bare repo
-    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
-    cd "${WORKSPACE_DIR:-/workspace}"
-    git config user.email "inject@swarm"
-    git config user.name "Swarm Inject"
-
-    # Prepare prompt — use line-conditional replacement to safely handle
-    # special chars (&, \, /) in guidance (same pattern as run_orchestrator)
-    local prompt
-    prompt=$(awk -v guidance="$guidance" -v next_num="$next_task_num" '{
-        if ($0 ~ /\{\{GUIDANCE\}\}/)      { gsub(/\{\{GUIDANCE\}\}/, "");      print guidance }
-        else if ($0 ~ /\{\{NEXT_TASK_NUM\}\}/) { gsub(/\{\{NEXT_TASK_NUM\}\}/, ""); print next_num }
-        else { print }
-    }' "${PROMPTS_DIR:-/prompts}/inject.md")
-
-    # Append shared task creation guide
-    prompt="${prompt}
-$(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
-    prompt="${SECURITY_NOTICE}${prompt}"
-
-    echo "Inject agent adding tasks for: $guidance" >> "$log_file"
-
-    run_claude "$prompt" "$log_file"
-    rm -f "$CLAUDE_OUTPUT_FILE"
-
-    echo "=== Inject agent finished $(date) ===" >> "$log_file"
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -360,14 +318,11 @@ case "$ROLE" in
     reviewer)
         run_reviewer
         ;;
-    inject)
-        run_inject
-        ;;
     specialist)
         run_specialist
         ;;
     *)
-        echo "Unknown role: $ROLE (expected orchestrator, worker, reviewer, specialist, or inject)" >&2
+        echo "Unknown role: $ROLE (expected orchestrator, worker, reviewer, or specialist)" >&2
         exit 1
         ;;
 esac
