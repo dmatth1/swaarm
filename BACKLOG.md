@@ -4,14 +4,6 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
-### Worker logs don't stream during claude session
-**Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
-Worker logs show the startup header then go silent for 15-30 min until claude finishes. Root cause: `claude -p` block-buffers to pipes, and `output=$(...)` re-buffers even with a PTY.
-**Fix**: `run_claude()` uses `script` for PTY + writes to `CLAUDE_OUTPUT_FILE` via `tee` (no subshell capture). Worker greps the file for signals/rate-limit after completion. Log file streams in real-time.
-- [x] `stdbuf -oL` — doesn't work (Node.js doesn't use C stdio)
-- [x] `script -qfc` PTY — works but `output=$(...)` re-buffers
-- [x] Refactored: removed `output=$(...)`, write to temp file, grep for signals
-- [ ] Validate in real swarm run
 
 ### stuck detection skips when done_count = 0
 **Bug** · `swarm:796`
@@ -84,10 +76,12 @@ All logging is line-based text. Machine-readable events would enable automation 
 
 ## Done
 
-### Stream worker logs to a centralized source
-- [x] All roles (worker, orchestrator, reviewer, specialist) use `tee -a` for real-time log streaming
+### Real-time log streaming for all roles
+- [x] `run_claude()` uses `claude -p --output-format stream-json --include-partial-messages` — tokens stream as they arrive, no PTY needed
+- [x] `docker/stream_parse.py` parses the JSON stream: `content_block_delta` → log in real-time; `result` text → `CLAUDE_OUTPUT_FILE` for signal grep
+- [x] Works cross-platform (macOS + Linux) — no `script` needed, no platform branching
 - [x] `./swarm logs <output-dir> [worker-N]` subcommand added (wraps `tail -f`)
-- [x] Tests: `tests/test_log_streaming.sh` (5 tests), `tests/test_logs.sh` (4 tests)
+- [x] Tests: `tests/test_log_streaming.sh` (12 tests), `tests/test_logs.sh` (6 tests)
 
 ### Allow specifying the claude model when launching or resuming
 - [x] `--model` flag on `./swarm` and `./swarm resume`

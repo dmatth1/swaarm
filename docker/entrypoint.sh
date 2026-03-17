@@ -19,10 +19,10 @@ if [[ -n "${MODEL:-}" ]]; then
 fi
 
 # Run claude with real-time log streaming.
-# Problem: `claude -p` block-buffers when stdout is a pipe, and `output=$(...)`
-# re-buffers even with a PTY because bash waits for the subshell to complete.
-# Fix: write to a temp file via tee (no subshell capture), stream to log in
-# real-time via PTY. Sets CLAUDE_OUTPUT_FILE for callers to grep afterwards.
+# --output-format stream-json --include-partial-messages streams tokens as they
+# arrive (no PTY needed — streaming is built into the CLI flag).
+# stream_parse.py writes text chunks to log in real-time and saves the final
+# result text to CLAUDE_OUTPUT_FILE for signal/rate-limit grep afterwards.
 run_claude() {
     local _rc_prompt="$1"
     local _rc_log="$2"
@@ -33,15 +33,10 @@ run_claude() {
 
     CLAUDE_OUTPUT_FILE=$(mktemp)
 
-    # script creates a PTY so claude sees a terminal → streams output line by line.
-    # tee writes to both the log file (real-time) and temp output file (for signal grep).
-    # No output=$(...) wrapper — that would re-buffer everything.
-    # macOS and Linux have incompatible script flags.
-    if [[ "$(uname)" == "Darwin" ]]; then
-        script -q /dev/null sh -c "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" 2>&1 | tr -d '\r' | tee -a "$_rc_log" > "$CLAUDE_OUTPUT_FILE" || true
-    else
-        script -qfc "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" /dev/null 2>&1 | tr -d '\r' | tee -a "$_rc_log" > "$CLAUDE_OUTPUT_FILE" || true
-    fi
+    claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p \
+        --output-format stream-json --verbose --include-partial-messages \
+        < "$_rc_prompt_file" 2>&1 | \
+    python3 "$(dirname "$0")/stream_parse.py" "$CLAUDE_OUTPUT_FILE" "$_rc_log" || true
 
     rm -f "$_rc_prompt_file"
 }
@@ -130,12 +125,10 @@ run_reviewer() {
     git config user.email "reviewer@swarm"
     git config user.name "Swarm Reviewer"
 
-    # Prepare prompt — substitute COMPLETED_TASK, REVIEW_NUM, and REVIEW_MODE
-    local review_mode="${REVIEW_MODE:-full}"
+    # Prepare prompt — substitute COMPLETED_TASK and REVIEW_NUM
     local prompt
     prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
-                 -e "s|{{REVIEW_MODE}}|${review_mode}|g" \
                  /prompts/reviewer.md)
 
     # Append shared task creation guide

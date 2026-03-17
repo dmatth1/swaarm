@@ -173,10 +173,10 @@ role_calls=$(grep -c 'run_claude "\$prompt"' "$ENTRYPOINT" 2>/dev/null || echo 0
     && pass "all 4 roles call run_claude ($role_calls found)" \
     || fail "expected at least 4 run_claude calls, found $role_calls"
 
-# Verify run_claude uses script for PTY-based streaming
-grep -q 'script.*claude' "$ENTRYPOINT" \
-    && pass "run_claude uses script for PTY-based streaming" \
-    || fail "run_claude missing script PTY wrapper"
+# Verify run_claude uses stream-json for built-in streaming (no PTY needed)
+grep -q 'stream-json' "$ENTRYPOINT" \
+    && pass "run_claude uses --output-format stream-json for built-in streaming" \
+    || fail "run_claude missing --output-format stream-json"
 
 teardown_test
 trap - EXIT
