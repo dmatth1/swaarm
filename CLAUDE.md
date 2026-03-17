@@ -78,6 +78,8 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 **Worker container lifecycle**: each worker container is long-lived — it clones `/upstream` into `/workspace` once at startup, then loops: pull → claim task → run claude → complete → repeat. The container persists across multiple tasks. Non-git state (installed packages, build artifacts) accumulates in `/workspace` across tasks on the same worker; this is intentional as later tasks typically depend on setup done by earlier ones. All canonical project state is in git.
 
+**When to rebuild the image**: prompts (`prompts/*.md`) and the `swarm` script are mounted or run on the host — no rebuild needed. **Rebuild when `Dockerfile` or `docker/entrypoint.sh` change**: `docker rmi swarm-agent && ./swarm ...` (auto-rebuilds on next run).
+
 ## Key Design Decisions
 
 - **CLAUDE.md as project index**: orchestrator creates it; reviewer updates it after each task; workers get it auto-loaded by Claude Code. Kept under 200 lines. Orientation (structure, stack, build commands) lives here; contracts (interfaces, criteria) stay in SPEC.md
