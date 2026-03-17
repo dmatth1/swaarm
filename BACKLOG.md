@@ -2,11 +2,11 @@
 
 ## P2 — Should fix
 
-### `--no-sweep` flag to skip specialist sweeps
-Specialist sweeps (pre-flight, post-augment, periodic) can be slow. Add a flag to skip them.
-- [ ] Add `--no-sweep` CLI flag (default: false — sweeps run as normal)
+### `--no-sweep` flag to skip pre-flight and post-augment specialist sweeps
+Pre-flight and post-augment specialist sweeps can be slow. Add a flag to skip them while keeping periodic sweeps (which run during normal operation and catch issues over time).
+- [ ] Add `--no-sweep` CLI flag (default: false — all sweeps run as normal)
 - [ ] Store in `swarm.state` as `SWARM_NO_SWEEP` for resume
-- [ ] Skip `run_specialist_sweep` calls when set
+- [ ] Skip pre-flight and post-augment `run_specialist_sweep` calls when set; keep periodic sweeps
 - [ ] Update `--help` and CLAUDE.md
 
 ### Auto-fallback on 529 overload
