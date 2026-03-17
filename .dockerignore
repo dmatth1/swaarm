@@ -3,3 +3,4 @@ swarm-*
 *.log
 docker/
 !docker/entrypoint.sh
+!docker/stream_parse.py
