@@ -1,0 +1,9 @@
+# Swarm run output directories
+swarm-*/
+swarm-test-*/
+
+# Project duplicates / scratch
+ProQ4-Dup/
+
+# OS
+.DS_Store
