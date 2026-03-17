@@ -31,6 +31,16 @@ The reviewer checks if code compiles and unit tests pass, but does not verify th
 - [ ] If required artifacts are missing, reviewer should create a fix task or reject the completion
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering artifact compliance check
 
+### Quiet periods for reviewer/specialist sweeps
+Workers currently run continuously while reviewers and specialists push changes in parallel — causing merge conflicts, stale interfaces, and wasted work. Implement periodic "quiet periods" where workers drain, then reviewer + specialists get exclusive access to restructure the plan.
+- [ ] After every N task completions (configurable, default 3-5), stop workers from claiming new tasks
+- [ ] Wait for all active tasks to drain (no active workers)
+- [ ] Run full reviewer with restructuring powers (split tasks, reorder deps, rewrite task descriptions, update manifests)
+- [ ] Run specialist sweep during quiet period
+- [ ] Restart workers after quiet period completes
+- [ ] Split reviewer into two modes: "quick check" (parallel, after each task — just runs tests) and "full review" (exclusive, during quiet periods — can restructure)
+- [ ] Idle workers cost nothing in API tokens, so throughput loss is wall-clock only
+
 ## P2 — Should fix
 
 ### cmd_kill has no tests

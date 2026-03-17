@@ -40,7 +40,7 @@ You: ./swarm "Build a todo REST API" --agents 3
   Orchestrator (1 Claude session)
   • Analyzes the task
   • Writes SPEC.md with tech stack, architecture, file layout
-  • Creates 5–15 numbered task files in tasks/pending/
+  • Creates numbered task files in tasks/pending/ (as many as needed)
   • Commits everything to shared bare git repo
          │
          ▼
