@@ -69,6 +69,7 @@ None | Requires task NNN
 ```
 
 Rules:
+- **Granular and composable** — one clear purpose per task. A task that does one thing well is better than a task that does three things. Granular tasks parallelize better, fail in isolation, and are easier for workers to complete correctly.
 - Be specific — vague tasks produce vague results
 - Each task must be completable by reading SPEC.md + the task file alone
 - Set dependencies only where a prior task's output is literally required on disk

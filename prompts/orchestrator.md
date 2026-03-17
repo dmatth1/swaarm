@@ -158,7 +158,7 @@ Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Numb
 **Checkpoint task — required for projects with 10 or more tasks:**
 Add one mid-project checkpoint task at roughly the 40–60% mark (e.g., `NNN-integration-checkpoint.md`). It runs the full test suite, verifies that all components built so far wire together correctly, and all subsequent tasks must depend on it. Use `## Produces: None` and `## Consumes: None`.
 
-**Task count:** create as many tasks as the project requires. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its `## Relevant Files` and listed interface definitions. If a task would require understanding more than that, split it.
+**Task count:** create as many tasks as the project requires — there is no cap. Lean toward **granular, composable tasks** over large monolithic ones. A task that does one thing well is better than a task that does three things. Granular tasks parallelize better, fail in isolation, and are easier for workers to complete correctly. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its `## Relevant Files` and listed interface definitions. If a task would require understanding more than that, split it.
 
 **Task file format:**
 

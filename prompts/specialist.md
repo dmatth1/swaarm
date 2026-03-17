@@ -81,7 +81,7 @@ git pull origin main --rebase
 git push origin main
 ```
 
-**If an improvement is too large for one session**, add it as a task to `tasks/pending/` instead — use the next available task number (check what's highest in `tasks/pending/` and `tasks/done/`). Then signal done and let workers handle it.
+**If an improvement is too large for one session**, add it as a task to `tasks/pending/` instead — use the next available task number (check what's highest in `tasks/pending/` and `tasks/done/`). Lean toward **granular, composable tasks** — one clear purpose per task. A task that does one thing is better than a task that addresses three issues. Then signal done and let workers handle it.
 
 ### Step 5: Signal Done
 
