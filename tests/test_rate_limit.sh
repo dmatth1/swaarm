@@ -188,4 +188,40 @@ grep -q "\[rate-limit\]" "$worker_log" \
 teardown_test
 trap - EXIT
 
+# ─── Test 5: Account usage cap triggers backoff ──────────────────────────────
+
+setup_test "rate-limit: account usage cap ('hit your limit') triggers backoff"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "add task"
+init_rate_limit_workspace
+
+# Claude returns account-level usage cap first, then ALL_DONE
+cat > "$MOCK_BIN/claude" << 'SCRIPT'
+#!/usr/bin/env bash
+count_file="$(dirname "$0")/call_count"
+count=$(cat "$count_file" 2>/dev/null || echo 0)
+count=$((count + 1))
+echo "$count" > "$count_file"
+if [[ $count -le 1 ]]; then
+    echo "You've hit your limit · resets 11pm (UTC)"
+    exit 1
+fi
+echo "ALL_DONE"
+SCRIPT
+chmod +x "$MOCK_BIN/claude"
+setup_sleep_mock
+
+run_worker_test
+
+sleep_log="$MOCK_BIN/sleep_log"
+backoff_sleeps=($(grep -v '^2$' "$sleep_log" 2>/dev/null || true))
+[[ "${#backoff_sleeps[@]}" -ge 1 ]] \
+    && pass "account usage cap triggered backoff sleep" \
+    || fail "account usage cap did not trigger backoff"
+
+teardown_test
+trap - EXIT
+
 print_summary

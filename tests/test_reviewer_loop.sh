@@ -27,9 +27,9 @@ setup_review_mocks() {
     MAX_WORKER_ITERATIONS=5
 }
 
-# ─── Test 1: ALL_COMPLETE in reviewer log terminates the loop ─────────────────
+# ─── Test 1: ALL_COMPLETE from regular reviewer defers to final drain ─────────
 
-setup_test "reviewer loop: ALL_COMPLETE terminates the loop"
+setup_test "reviewer loop: ALL_COMPLETE from regular reviewer defers to --final-- drain"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -42,13 +42,21 @@ REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    # Regular reviewer signals ALL_COMPLETE, but loop should NOT terminate here —
+    # it must proceed to final specialist sweep + --final-- drain reviewer.
+    if [[ "$1" == "--final--" ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
 }
 
 run_with_review 1
 
-assert_eq "1" "${#REVIEWER_CALLS[@]}" "reviewer called exactly once"
-assert_eq "001-setup.md" "${REVIEWER_CALLS[0]}" "reviewer called for done task"
+# Expect: regular review of 001-setup.md, THEN --final-- drain
+assert_eq "2" "${#REVIEWER_CALLS[@]}" "reviewer called twice (regular + final drain)"
+assert_eq "001-setup.md" "${REVIEWER_CALLS[0]}" "first call reviews the done task"
+assert_eq "--final--" "${REVIEWER_CALLS[1]}" "second call is --final-- drain"
 
 teardown_test
 trap - EXIT
@@ -66,21 +74,23 @@ load_swarm
 setup_review_mocks
 
 REVIEWER_CALLS=()
-call_num=0
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
-    call_num=$((call_num + 1))
     mkdir -p "$LOGS_DIR"
-    if [[ "$call_num" -lt 2 ]]; then
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    else
+    if [[ "$1" == "--final--" ]]; then
         echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
     fi
 }
 
 run_with_review 1
 
-assert_eq "2" "${#REVIEWER_CALLS[@]}" "both tasks reviewed"
+# Expect: both done tasks reviewed, then --final-- drain
+assert_eq "3" "${#REVIEWER_CALLS[@]}" "both tasks reviewed plus final drain"
+assert_eq "001-setup.md" "${REVIEWER_CALLS[0]}" "first task reviewed"
+assert_eq "002-build.md" "${REVIEWER_CALLS[1]}" "second task reviewed"
+assert_eq "--final--" "${REVIEWER_CALLS[2]}" "final drain after both reviewed"
 
 teardown_test
 trap - EXIT
@@ -209,6 +219,171 @@ done
 [[ "$found_final" == "true" ]] \
     && pass "--final-- drain was called after all work completed" \
     || fail "--final-- drain not called"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 6: ALL_COMPLETE from blocked-task reviewer defers to final drain ────
+
+setup_test "reviewer loop: ALL_COMPLETE from blocked-task reviewer defers to --final-- drain"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+push_file_to_repo "tasks/pending/BLOCKED-002-build.md" "# Task 002 blocked" "blocked"
+
+load_swarm
+setup_review_mocks
+
+REVIEWER_CALLS=()
+docker_run_reviewer() {
+    REVIEWER_CALLS+=("$1")
+    mkdir -p "$LOGS_DIR"
+    if [[ "$1" == "--final--" ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    elif [[ "$1" == "BLOCKED-002-build.md" ]]; then
+        # Blocked reviewer signals ALL_COMPLETE — should be ignored
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        # Simulate the blocked task being resolved (moved to done)
+        rm -f "$MAIN_DIR/tasks/pending/BLOCKED-002-build.md"
+        mkdir -p "$MAIN_DIR/tasks/done"
+        printf '# Task 002\n' > "$MAIN_DIR/tasks/done/002-build.md"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+run_with_review 1
+
+# Verify --final-- drain was reached despite blocked reviewer signaling ALL_COMPLETE
+found_final=false
+for call in "${REVIEWER_CALLS[@]+"${REVIEWER_CALLS[@]}"}"; do
+    [[ "$call" == "--final--" ]] && found_final=true && break
+done
+[[ "$found_final" == "true" ]] \
+    && pass "--final-- drain reached despite blocked reviewer signaling ALL_COMPLETE" \
+    || fail "--final-- drain not reached — blocked reviewer's ALL_COMPLETE short-circuited the loop"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 7: Final specialist sweep runs before --final-- drain ──────────────
+
+setup_test "reviewer loop: final specialist sweep runs before --final-- drain"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+
+load_swarm
+setup_review_mocks
+
+SPECIALIST_SWEEPS=()
+run_specialist_sweep() {
+    SPECIALIST_SWEEPS+=("$1")
+}
+
+REVIEWER_CALLS=()
+docker_run_reviewer() {
+    REVIEWER_CALLS+=("$1")
+    mkdir -p "$LOGS_DIR"
+    if [[ "$1" == "--final--" ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+run_with_review 1
+
+# Verify final specialist sweep ran
+found_final_sweep=false
+for sweep in "${SPECIALIST_SWEEPS[@]+"${SPECIALIST_SWEEPS[@]}"}"; do
+    [[ "$sweep" == "final" ]] && found_final_sweep=true && break
+done
+[[ "$found_final_sweep" == "true" ]] \
+    && pass "final specialist sweep ran before --final-- drain" \
+    || fail "final specialist sweep did not run"
+
+# Verify --final-- drain reviewer ran after sweep
+last_idx=$(( ${#REVIEWER_CALLS[@]} - 1 ))
+assert_eq "--final--" "${REVIEWER_CALLS[$last_idx]}" "last reviewer call is --final-- drain"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 8: Specialist sweep runs specialists in parallel ────────────────────
+
+setup_test "reviewer loop: specialist sweep runs all specialists in parallel"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Create a SPEC.md with 3 specialists
+push_file_to_repo "SPEC.md" "$(cat <<'SPECEOF'
+# Test Spec
+**Task:** test
+
+## Success Criteria
+- [ ] pass
+
+## Specialists
+
+### SecurityExpert
+Review code for vulnerabilities
+
+### PerformanceEngineer
+Optimize hot paths
+
+### QAEngineer
+Verify test coverage
+SPECEOF
+)" "add spec with specialists"
+
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+
+load_swarm
+# Don't use setup_review_mocks — we want the real run_specialist_sweep
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { :; }
+
+# Track specialist calls
+SPECIALIST_CALLS_FILE="$TEST_TMPDIR/specialist_calls"
+docker_run_specialist() {
+    echo "$1" >> "$SPECIALIST_CALLS_FILE"
+}
+
+_g_specialist_count=0
+run_specialist_sweep "test"
+
+# Verify all 3 specialists were called
+if [[ -f "$SPECIALIST_CALLS_FILE" ]]; then
+    call_count=$(wc -l < "$SPECIALIST_CALLS_FILE" | tr -d ' ')
+    [[ "$call_count" -eq 3 ]] \
+        && pass "all 3 specialists ran ($call_count calls)" \
+        || fail "expected 3 specialist calls, got $call_count"
+
+    grep -q "SecurityExpert" "$SPECIALIST_CALLS_FILE" \
+        && pass "SecurityExpert was called" \
+        || fail "SecurityExpert not called"
+
+    grep -q "PerformanceEngineer" "$SPECIALIST_CALLS_FILE" \
+        && pass "PerformanceEngineer was called" \
+        || fail "PerformanceEngineer not called"
+
+    grep -q "QAEngineer" "$SPECIALIST_CALLS_FILE" \
+        && pass "QAEngineer was called" \
+        || fail "QAEngineer not called"
+else
+    fail "no specialist calls recorded"
+    fail "SecurityExpert not called"
+    fail "PerformanceEngineer not called"
+    fail "QAEngineer not called"
+fi
 
 teardown_test
 trap - EXIT

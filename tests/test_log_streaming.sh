@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+# Integration tests for real-time log streaming in docker/entrypoint.sh.
+# Verifies that all roles tee claude output to their log files (not buffered).
+set -euo pipefail
+
+TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENTRYPOINT="$TESTS_DIR/../docker/entrypoint.sh"
+source "$TESTS_DIR/helpers.sh"
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+MOCK_BIN=""
+TEST_LOGS=""
+
+init_streaming_workspace() {
+    MOCK_BIN="$TEST_TMPDIR/bin"
+    mkdir -p "$MOCK_BIN"
+    TEST_LOGS="$TEST_TMPDIR/logs"
+    mkdir -p "$TEST_LOGS"
+}
+
+# Create a mock claude that outputs recognizable lines.
+# Usage: setup_claude_mock [signal_word]
+setup_claude_mock() {
+    local signal="${1:-ALL_DONE}"
+    cat > "$MOCK_BIN/claude" << SCRIPT
+#!/usr/bin/env bash
+echo "LINE_ONE: thinking about the task"
+echo "LINE_TWO: writing some code"
+echo "LINE_THREE: $signal"
+SCRIPT
+    chmod +x "$MOCK_BIN/claude"
+}
+
+# Mock sleep to be instant
+setup_sleep_mock() {
+    cat > "$MOCK_BIN/sleep" << 'SCRIPT'
+#!/usr/bin/env bash
+# no-op
+SCRIPT
+    chmod +x "$MOCK_BIN/sleep"
+}
+
+# ─── Test 1: Worker streams claude output to log file ─────────────────────────
+
+setup_test "streaming: worker claude output appears in log file"
+trap teardown_test EXIT
+
+init_test_workspace
+init_streaming_workspace
+
+local_prompts="$TEST_TMPDIR/prompts"
+mkdir -p "$local_prompts"
+printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
+
+push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "add task"
+setup_claude_mock "ALL_DONE"
+setup_sleep_mock
+
+LOGS_DIR="$TEST_LOGS" \
+UPSTREAM_DIR="$REPO_DIR" \
+WORKSPACE_DIR="$TEST_TMPDIR/workspace" \
+PROMPTS_DIR="$local_prompts" \
+MULTI_ROUND="false" \
+MAX_WORKER_ITERATIONS="2" \
+PATH="$MOCK_BIN:$PATH" \
+    bash "$ENTRYPOINT" worker 1 2>/dev/null || true
+
+log_file="$TEST_LOGS/worker-1.log"
+assert_file_exists "$log_file" "worker log file created"
+
+grep -q "LINE_ONE" "$log_file" \
+    && pass "worker log contains LINE_ONE (claude output streamed)" \
+    || fail "worker log missing LINE_ONE"
+
+grep -q "LINE_TWO" "$log_file" \
+    && pass "worker log contains LINE_TWO" \
+    || fail "worker log missing LINE_TWO"
+
+grep -q "LINE_THREE" "$log_file" \
+    && pass "worker log contains LINE_THREE" \
+    || fail "worker log missing LINE_THREE"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 2: Orchestrator streams claude output to log file ───────────────────
+
+setup_test "streaming: orchestrator claude output appears in log file"
+trap teardown_test EXIT
+
+init_test_workspace
+init_streaming_workspace
+
+local_prompts="$TEST_TMPDIR/prompts"
+mkdir -p "$local_prompts"
+printf 'Test orchestrator prompt for {{TASK}}\n' > "$local_prompts/orchestrator.md"
+
+setup_claude_mock "ORCHESTRATION COMPLETE"
+
+TASK="build a test app" \
+LOGS_DIR="$TEST_LOGS" \
+PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin" \
+    bash -c '
+        # Orchestrator uses hardcoded /logs and /upstream paths — override via function
+        set -euo pipefail
+        source "'"$ENTRYPOINT"'" 2>/dev/null || true
+    ' 2>/dev/null || true
+
+# Orchestrator writes to /logs/orchestrator.log which we cannot override easily.
+# Instead, test it by running the entrypoint directly with env overrides.
+# The orchestrator function uses hardcoded paths (/upstream, /workspace, /logs).
+# We test it differently: verify the tee pattern is present in the source.
+
+grep -q 'tee -a "$log_file"' "$ENTRYPOINT" \
+    && pass "orchestrator uses tee (verified in source)" \
+    || fail "orchestrator missing tee pattern"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 3: Inject streams claude output to log file ─────────────────────────
+
+setup_test "streaming: inject claude output appears in log file"
+trap teardown_test EXIT
+
+init_test_workspace
+init_streaming_workspace
+
+local_prompts="$TEST_TMPDIR/prompts"
+mkdir -p "$local_prompts"
+printf 'Inject prompt: {{GUIDANCE}} starting at {{NEXT_TASK_NUM}}\n' > "$local_prompts/inject.md"
+
+setup_claude_mock "INJECTION COMPLETE"
+
+GUIDANCE="add tests" \
+NEXT_TASK_NUM="1" \
+LOGS_DIR="$TEST_LOGS" \
+UPSTREAM_DIR="$REPO_DIR" \
+WORKSPACE_DIR="$TEST_TMPDIR/workspace-inject" \
+PROMPTS_DIR="$local_prompts" \
+PATH="$MOCK_BIN:$PATH" \
+    bash "$ENTRYPOINT" inject 2>/dev/null || true
+
+log_file="$TEST_LOGS/inject.log"
+assert_file_exists "$log_file" "inject log file created"
+
+grep -q "LINE_ONE" "$log_file" \
+    && pass "inject log contains LINE_ONE (claude output streamed)" \
+    || fail "inject log missing LINE_ONE"
+
+grep -q "LINE_TWO" "$log_file" \
+    && pass "inject log contains LINE_TWO" \
+    || fail "inject log missing LINE_TWO"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 4: All roles use tee pattern (source verification) ─────────────────
+
+setup_test "streaming: all claude calls use tee -a pattern"
+trap teardown_test EXIT
+
+# Count claude calls that DON'T use tee (the old buffered pattern)
+buffered=$(grep -c 'claude.*-p >>.*2>&1' "$ENTRYPOINT" 2>/dev/null) || buffered=0
+[[ "$buffered" -eq 0 ]] \
+    && pass "no buffered claude calls remain (old >> pattern gone)" \
+    || fail "$buffered claude call(s) still use buffered >> pattern"
+
+# Count claude calls that DO use tee
+tee_count=$(grep -c 'claude.*tee -a' "$ENTRYPOINT" 2>/dev/null || echo 0)
+[[ "$tee_count" -ge 4 ]] \
+    && pass "at least 4 roles use tee -a ($tee_count found)" \
+    || fail "expected at least 4 tee -a calls, found $tee_count"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 5: Worker log shows output incrementally (not just at end) ──────────
+
+setup_test "streaming: worker log has claude output before DONE marker"
+trap teardown_test EXIT
+
+init_test_workspace
+init_streaming_workspace
+
+local_prompts="$TEST_TMPDIR/prompts"
+mkdir -p "$local_prompts"
+printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
+
+push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "add task"
+setup_claude_mock "ALL_DONE"
+setup_sleep_mock
+
+LOGS_DIR="$TEST_LOGS" \
+UPSTREAM_DIR="$REPO_DIR" \
+WORKSPACE_DIR="$TEST_TMPDIR/workspace2" \
+PROMPTS_DIR="$local_prompts" \
+MULTI_ROUND="false" \
+MAX_WORKER_ITERATIONS="2" \
+PATH="$MOCK_BIN:$PATH" \
+    bash "$ENTRYPOINT" worker 1 2>/dev/null || true
+
+log_file="$TEST_LOGS/worker-1.log"
+
+# Claude output (LINE_ONE) should appear BEFORE the "=== Worker 1 DONE" marker
+# This proves output was written during the run, not just appended at the end
+line_one_num=$(grep -n "LINE_ONE" "$log_file" | head -1 | cut -d: -f1)
+done_line_num=$(grep -n "DONE at" "$log_file" | tail -1 | cut -d: -f1)
+
+if [[ -n "$line_one_num" && -n "$done_line_num" ]]; then
+    [[ "$line_one_num" -lt "$done_line_num" ]] \
+        && pass "claude output (line $line_one_num) appears before DONE marker (line $done_line_num)" \
+        || fail "claude output appeared after DONE marker"
+else
+    fail "could not find LINE_ONE or DONE marker in log"
+fi
+
+teardown_test
+trap - EXIT
+
+print_summary

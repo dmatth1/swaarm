@@ -28,6 +28,7 @@ TASK=""
 VERBOSE=false
 MAX_WORKER_ITERATIONS=100
 DOCKER_IMAGE="swarm-agent"
+MODEL=""
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
 
@@ -46,6 +47,7 @@ Options:
   -o, --output DIR      Output directory (default: ./swarm-TIMESTAMP)
   -v, --verbose         Show agent output in real-time
   --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
+  --model MODEL         Claude model to use (e.g. opus, sonnet, opus[1m])
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   -h, --help            Show this help
 
@@ -53,7 +55,8 @@ Subcommands:
   swarm status <output-dir>           Show live status of a running swarm
   swarm kill <output-dir> [agent-id]  Kill all agents or a specific one
                                        agent-id: worker-1, worker-2, ..., orchestrator
-  swarm resume <output-dir> [-n N]    Resume after interruption (rate limit, crash, kill)
+  swarm resume <output-dir> [-n N] [--model M]
+                                      Resume after interruption (rate limit, crash, kill)
   swarm cleanup [output-dir]          Remove orphaned containers (all runs, or specific run)
 
 Examples:
@@ -175,6 +178,48 @@ cmd_status() {
     echo
 }
 
+cmd_logs() {
+    local output_dir="${1:-}"
+    local target="${2:-}"
+
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm logs <output-dir> [worker-N | orchestrator | all]"
+        exit 1
+    fi
+
+    local logs_dir="$output_dir/logs"
+    if [[ ! -d "$logs_dir" ]]; then
+        error "No logs directory found: $logs_dir"
+        exit 1
+    fi
+
+    if [[ -z "$target" || "$target" == "all" ]]; then
+        # Tail all log files
+        local log_files=()
+        for f in "$logs_dir"/*.log; do
+            [[ -f "$f" ]] && log_files+=("$f")
+        done
+        if [[ "${#log_files[@]}" -eq 0 ]]; then
+            error "No log files found in $logs_dir"
+            exit 1
+        fi
+        info "Tailing ${#log_files[@]} log file(s) — Ctrl-C to stop"
+        echo
+        tail -f "${log_files[@]}"
+    else
+        local log_file="$logs_dir/${target}.log"
+        if [[ ! -f "$log_file" ]]; then
+            error "Log file not found: $log_file"
+            info "Available logs:"
+            ls "$logs_dir"/*.log 2>/dev/null | xargs -I{} basename {} | sed 's/\.log$//' | sed 's/^/  /'
+            exit 1
+        fi
+        info "Tailing $log_file — Ctrl-C to stop"
+        echo
+        tail -f "$log_file"
+    fi
+}
+
 cmd_kill() {
     local output_dir="${1:-}"
     local target="${2:-}"
@@ -255,9 +300,10 @@ cmd_cleanup() {
 cmd_resume() {
     local output_dir="${1:-}"
     local override_agents="${2:-}"
+    local override_model="${3:-}"
 
     if [[ -z "$output_dir" ]]; then
-        error "Usage: swarm resume <output-dir> [-n N]"
+        error "Usage: swarm resume <output-dir> [-n N] [--model M]"
         exit 1
     fi
     if [[ ! -d "$output_dir/main/tasks" ]]; then
@@ -273,9 +319,10 @@ cmd_resume() {
     fi
 
     # shellcheck source=/dev/null
-    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS (SWARM_DOCKER/SWARM_MULTI_ROUND ignored if present in old state files)
+    source "$state_file"  # sets SWARM_TASK, SWARM_AGENTS, SWARM_MODEL
 
     local agents="${override_agents:-$SWARM_AGENTS}"
+    MODEL="${override_model:-${SWARM_MODEL:-}}"
 
     OUTPUT_DIR="$(cd "$output_dir" && pwd)"
     REPO_DIR="$OUTPUT_DIR/repo.git"
@@ -289,6 +336,7 @@ cmd_resume() {
     echo
     info "Task:   $SWARM_TASK"
     info "Agents: $agents"
+    [[ -n "$MODEL" ]] && info "Model:  $MODEL"
     info "Output: $OUTPUT_DIR"
     echo
 
@@ -407,6 +455,7 @@ cmd_inject() {
               "$MAIN_DIR/tasks/done/"*.md; do
         [[ -f "$f" ]] || continue
         num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+        num=$((10#$num))  # strip leading zeros to avoid octal interpretation
         [[ "$num" -gt "$max_num" ]] && max_num="$num"
     done
     local next_num=$(( max_num + 1 ))
@@ -422,6 +471,7 @@ cmd_inject() {
     for f in "$MAIN_DIR/tasks/pending/"*.md; do
         [[ -f "$f" ]] || continue
         num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+        num=$((10#$num))  # strip leading zeros to avoid octal interpretation
         [[ "$num" -ge "$next_num" ]] && added=$((added + 1))
     done
 
@@ -484,6 +534,7 @@ docker_run_orchestrator() {
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e TASK="$TASK" \
         -e VERBOSE="$VERBOSE" \
+        ${MODEL:+-e MODEL="$MODEL"} \
         "$DOCKER_IMAGE" \
         orchestrator || true
 
@@ -536,6 +587,7 @@ docker_run_inject() {
         -e GUIDANCE="$guidance" \
         -e NEXT_TASK_NUM="$next_task_num" \
         -e VERBOSE="$VERBOSE" \
+        ${MODEL:+-e MODEL="$MODEL"} \
         "$DOCKER_IMAGE" \
         inject || true
 
@@ -575,6 +627,7 @@ docker_run_worker() {
         -e VERBOSE="$VERBOSE" \
         -e MAX_WORKER_ITERATIONS="$MAX_WORKER_ITERATIONS" \
         -e MULTI_ROUND=true \
+        ${MODEL:+-e MODEL="$MODEL"} \
         "$DOCKER_IMAGE" \
         worker "$agent_id" > /dev/null
 
@@ -604,6 +657,7 @@ docker_run_reviewer() {
         -e COMPLETED_TASK="$task_name" \
         -e REVIEW_NUM="$review_num" \
         -e VERBOSE="$VERBOSE" \
+        ${MODEL:+-e MODEL="$MODEL"} \
         "$DOCKER_IMAGE" \
         reviewer || true
 }
@@ -631,6 +685,7 @@ docker_run_specialist() {
         -e SPECIALIST_ROLE="$specialist_role" \
         -e SPECIALIST_NUM="$specialist_num" \
         -e VERBOSE="$VERBOSE" \
+        ${MODEL:+-e MODEL="$MODEL"} \
         "$DOCKER_IMAGE" \
         specialist || true
 }
@@ -647,7 +702,10 @@ run_specialist_sweep() {
 
     [[ -z "$spec_names" ]] && return 0
 
-    log "Running specialist sweep: ${sweep_label}"
+    # Collect specialists to run
+    local -a specialist_names=()
+    local -a specialist_roles=()
+    local -a specialist_nums=()
     local sname
     while IFS= read -r sname; do
         [[ -z "$sname" ]] && continue
@@ -657,10 +715,31 @@ run_specialist_sweep() {
         [[ -z "$srole" ]] && continue
 
         _g_specialist_count=$(( _g_specialist_count + 1 ))
-        log "  Specialist: $sname"
-        docker_run_specialist "$sname" "$srole" "$_g_specialist_count"
-        sync_main
+        specialist_names+=("$sname")
+        specialist_roles+=("$srole")
+        specialist_nums+=("$_g_specialist_count")
     done <<< "$spec_names"
+
+    local count="${#specialist_names[@]}"
+    [[ "$count" -eq 0 ]] && return 0
+
+    log "Running specialist sweep: ${sweep_label} ($count specialist(s) in parallel)"
+
+    # Launch all specialists in parallel
+    local -a pids=()
+    local i
+    for i in $(seq 0 $(( count - 1 ))); do
+        log "  Specialist: ${specialist_names[$i]}"
+        docker_run_specialist "${specialist_names[$i]}" "${specialist_roles[$i]}" "${specialist_nums[$i]}" &
+        pids+=($!)
+    done
+
+    # Wait for all to finish
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    sync_main
 }
 
 check_and_respawn_dead_workers() {
@@ -1030,6 +1109,7 @@ main() {
     echo
     info "Task:   $TASK"
     info "Agents: $NUM_AGENTS"
+    [[ -n "$MODEL" ]] && info "Model:  $MODEL"
     info "Output: $OUTPUT_DIR"
     echo
 
@@ -1061,6 +1141,7 @@ main() {
     {
         printf 'SWARM_TASK=%q\n' "$TASK"
         printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
+        printf 'SWARM_MODEL=%q\n' "$MODEL"
         printf 'SWARM_STARTED="%s"\n' "$(date)"
     } > "$OUTPUT_DIR/swarm.state"
 
@@ -1138,6 +1219,11 @@ case "${1:-}" in
         cmd_status "${1:-}"
         exit 0
         ;;
+    logs)
+        shift
+        cmd_logs "${1:-}" "${2:-}"
+        exit 0
+        ;;
     kill)
         shift
         cmd_kill "${1:-}" "${2:-}"
@@ -1147,14 +1233,16 @@ case "${1:-}" in
         shift
         output_dir="${1:-}"
         override_agents=""
+        override_model=""
         shift 2>/dev/null || true
         while [[ $# -gt 0 ]]; do
             case $1 in
                 -n|--agents) override_agents="$2"; shift 2 ;;
+                --model) override_model="$2"; shift 2 ;;
                 *) shift ;;
             esac
         done
-        cmd_resume "$output_dir" "$override_agents"
+        cmd_resume "$output_dir" "$override_agents" "$override_model"
         exit 0
         ;;
     inject)
@@ -1174,6 +1262,7 @@ while [[ $# -gt 0 ]]; do
         -n|--agents)        NUM_AGENTS="$2"; shift 2 ;;
         -o|--output)        OUTPUT_DIR="$2"; shift 2 ;;
         -v|--verbose)       VERBOSE=true; shift ;;
+        --model)            MODEL="$2"; shift 2 ;;
         --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         -h|--help)      usage; exit 0 ;;

@@ -11,6 +11,7 @@ docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker modes)
 prompts/orchestrator.md  ← Orchestrator prompt template
 prompts/worker.md        ← Worker prompt template
 prompts/reviewer.md      ← Reviewer agent prompt template
+prompts/inject.md        ← Inject agent prompt template
 BACKLOG.md               ← Known bugs, missing tests, and planned features
 ```
 
@@ -83,16 +84,19 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 - **Stateless invocations**: agents re-read `SPEC.md` and task queue every call; state is only in git
 - **`.gitkeep` files**: keeps `tasks/active/` and `tasks/done/` tracked by git when empty
 - **`set -euo pipefail`**: use `var=$((var + 1))` not `((var++))`, use `if`/`then` not `[[ ]] && cmd`
-- **Rate-limit backoff**: workers detect rate-limit output from claude and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`
+- **Rate-limit backoff**: workers detect rate-limit output from claude (429, "too many requests", "quota exceeded", account-level "hit your limit / resets UTC") and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`
+- **Real-time log streaming**: all roles use `tee -a "$log_file"` so claude output streams to log files line-by-line; `./swarm logs` wraps `tail -f` for convenience
+- **Parallel specialist sweeps**: all specialists in a sweep launch concurrently (background `&` + `wait`); each gets its own container/clone; push conflicts handled by rebase in specialist prompt
 
 ## Subcommands
 
 ```bash
-./swarm "<task>" [--agents N] [--output DIR] [--verbose]
+./swarm "<task>" [--agents N] [--output DIR] [--model M] [--verbose]
 ./swarm status <output-dir>
 ./swarm kill <output-dir> [agent-id]
-./swarm resume <output-dir> [-n N]   # unsticks active tasks, re-spawns workers
+./swarm resume <output-dir> [-n N] [--model M]  # unsticks active tasks, re-spawns workers
 ./swarm inject <output-dir> "<guidance>"  # add tasks to existing run
+./swarm logs <output-dir> [worker-N]     # tail agent logs in real-time
 ```
 
 `swarm.state` (written at init) stores `SWARM_TASK` and `SWARM_AGENTS` for resume.

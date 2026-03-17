@@ -73,7 +73,8 @@ swarm closely matches Anthropic's original multi-agent architecture:
 Options:
   -n, --agents N    Number of parallel workers (default: 3)
   -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
-  -v, --verbose     Stream agent output live to terminal
+  -v, --verbose     Show agent output in terminal (logs always stream to files)
+  --model MODEL     Claude model to use (e.g. opus, sonnet, opus[1m])
   -h, --help        Show help
 ```
 
@@ -90,10 +91,15 @@ Options:
 
 # Resume after interruption (rate limit, crash, kill)
 ./swarm resume <output-dir>
-./swarm resume <output-dir> -n 2   # resume with fewer/more workers
+./swarm resume <output-dir> -n 2           # resume with fewer/more workers
+./swarm resume <output-dir> --model opus   # resume with a different model
 
 # Add tasks to a running or paused swarm
 ./swarm inject <output-dir> "<new guidance>"
+
+# Tail agent logs in real-time
+./swarm logs <output-dir>              # all logs
+./swarm logs <output-dir> worker-1     # specific agent
 ```
 
 ## Examples
@@ -109,6 +115,8 @@ Options:
   --output ./test-results
 
 ./swarm "Build a static site generator that converts Markdown to HTML with Jinja2 templates"
+
+./swarm "Build a real-time chat server" --model opus --agents 4
 ```
 
 ## Output structure
@@ -136,15 +144,17 @@ swarm-20240115-143022/
 
 ## Monitoring
 
-```bash
-# Live task progress
-watch -n 5 'ls swarm-*/main/tasks/done/'
+Agent logs stream in real-time — you can watch what each agent's Claude is thinking as it works.
 
-# Follow all agent logs at once
-tail -f swarm-*/logs/*.log
+```bash
+# Follow all agent logs (real-time)
+./swarm logs ./swarm-20240115-143022
 
 # Follow a specific worker
-tail -f swarm-*/logs/worker-1.log
+./swarm logs ./swarm-20240115-143022 worker-1
+
+# Live task progress
+watch -n 5 'ls swarm-*/main/tasks/done/'
 
 # Structured status view
 ./swarm status ./swarm-20240115-143022
@@ -152,7 +162,7 @@ tail -f swarm-*/logs/worker-1.log
 
 ## Resuming after interruption
 
-**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter) while keeping their task claimed. When the limit resets, they resume automatically — no intervention needed. Their task stays in `tasks/active/` throughout.
+**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude — both API-level 429 errors and account-level usage caps ("You've hit your limit") — and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter) while keeping their task claimed. When the limit resets, they resume automatically — no intervention needed. Their task stays in `tasks/active/` throughout.
 
 If you want to restart immediately after a rate limit clears rather than waiting for the backoff, use `resume`.
 
