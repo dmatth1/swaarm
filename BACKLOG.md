@@ -9,8 +9,14 @@ Every worker invocation starts cold — re-reads SPEC.md, scans the task queue, 
 - [ ] Orchestrator creates an initial `CLAUDE.md` alongside SPEC.md (project structure, tech stack, key interfaces, file layout)
 - [ ] Reviewer updates `CLAUDE.md` after each task completion (new files, changed interfaces, architectural decisions made by workers)
 - [ ] Keep `CLAUDE.md` under 200 lines — compact when it grows, preserving only current state (not history)
-- [ ] Add task-scoped file manifests: orchestrator lists relevant files per task so workers skip the "scan everything" phase
 - [ ] Update orchestrator and reviewer prompts accordingly
+
+### Task-scoped file manifests
+Workers currently scan the entire codebase to figure out which files are relevant to their task. The orchestrator already knows (roughly) which files each task will touch — make it explicit in the task file. Workers read only those files instead of exploring everything, cutting orientation tokens significantly on larger projects.
+- [ ] Orchestrator includes a `## Relevant files` section in each task file (files to create, read, or modify + why)
+- [ ] Orchestrator includes a `## Don't need to read` section for large projects to explicitly exclude irrelevant modules
+- [ ] Reviewer updates file manifests on remaining pending tasks after each completion (correcting orchestrator's initial guesses with ground truth)
+- [ ] Update orchestrator and worker prompts accordingly
 
 ### Worker logs don't stream during claude session
 **Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
