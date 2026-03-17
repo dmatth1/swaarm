@@ -6,11 +6,13 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P2 — Should fix
 
-### Silent git failures in critical paths
-Git clone/push/pull operations throughout the script are silenced with `2>/dev/null` or `|| true`. When they fail (e.g. during unstick or respawn), tasks stay stuck with no error message.
-- [ ] Audit all git operations for silent failure
-- [ ] Add error checking on critical paths (unstick, respawn, bootstrap)
-- [ ] Log failures instead of swallowing them
+### Silent git failures in critical paths — **Fixed**
+- [x] Audited all git operations — categorized 50+ `2>/dev/null` sites as critical vs harmless
+- [x] `sync_main()` and `sync_remote()` now warn on failure instead of silent `|| true`
+- [x] All clone ops in unstick/bootstrap/resume paths validate exit code and warn on failure
+- [x] Entrypoint: orchestrator/reviewer/specialist clones validated (exit 2 on failure, stderr to log)
+- [x] Worker `git pull` stderr redirected to log file instead of `/dev/null`
+- [x] Replaced inline `git pull` calls with `sync_main` where appropriate
 
 ### Auto-fallback to alternate model on 529 overload errors
 When workers hit repeated 529 (overloaded) errors, they currently just backoff and retry the same model indefinitely. A smarter approach would detect sustained overload and automatically switch to a fallback model (e.g. opus → sonnet → haiku) until the primary recovers.

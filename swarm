@@ -359,36 +359,40 @@ cmd_resume() {
     echo
 
     # Pull latest state
-    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+    sync_main
 
     # Return any stuck tasks (worker-N--NNN-task.md) back to pending
     local unstick_dir
     unstick_dir=$(mktemp -d)
-    git clone "$REPO_DIR" "$unstick_dir" -q 2>/dev/null
-    (
-        cd "$unstick_dir"
-        git config user.email "swarm@local"
-        git config user.name "Swarm Resume"
-        local any_moved=false
-        for sf in tasks/active/worker-*.md; do
-            if [[ -f "$sf" ]]; then
-                local tname
-                tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
-                log "  Returning stuck task: $tname"
-                mv "$sf" "tasks/pending/$tname"
-                any_moved=true
+    if ! git clone "$REPO_DIR" "$unstick_dir" -q 2>&1; then
+        warn "git clone failed for unstick — skipping"
+        rm -rf "$unstick_dir"
+    else
+        (
+            cd "$unstick_dir"
+            git config user.email "swarm@local"
+            git config user.name "Swarm Resume"
+            local any_moved=false
+            for sf in tasks/active/worker-*.md; do
+                if [[ -f "$sf" ]]; then
+                    local tname
+                    tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
+                    log "  Returning stuck task: $tname"
+                    mv "$sf" "tasks/pending/$tname"
+                    any_moved=true
+                fi
+            done
+            if [[ "$any_moved" == "true" ]]; then
+                git add -A
+                git commit -m "resume: return stuck tasks to pending" -q
+                git push origin main -q
             fi
-        done
-        if [[ "$any_moved" == "true" ]]; then
-            git add -A
-            git commit -m "resume: return stuck tasks to pending" -q
-            git push origin main -q
-        fi
-    ) || warn "Failed to unstick tasks in temp clone"
-    rm -rf "$unstick_dir"
+        ) || warn "Failed to unstick tasks in temp clone"
+        rm -rf "$unstick_dir"
+    fi
 
     # Sync main view
-    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+    sync_main
 
     local pending done_n
     pending=$(find "$MAIN_DIR/tasks/pending" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
@@ -701,27 +705,31 @@ check_and_respawn_dead_workers() {
             log "Worker $i died with $stuck_count stuck task(s) — unsticking..."
             local tmp
             tmp=$(mktemp -d)
-            git clone "$REPO_DIR" "$tmp" -q 2>/dev/null
-            (
-                cd "$tmp"
-                git config user.email "swarm@local"
-                git config user.name "Swarm Harness"
-                local moved=false
-                local sf
-                for sf in tasks/active/worker-${i}--*.md; do
-                    [[ -f "$sf" ]] || continue
-                    local tname
-                    tname=$(basename "$sf" | sed "s/worker-${i}--//")
-                    mv "$sf" "tasks/pending/$tname"
-                    moved=true
-                done
-                if [[ "$moved" == "true" ]]; then
-                    git add -A
-                    git commit -m "harness: unstick worker-${i} tasks after crash" -q
-                    git push origin main -q
-                fi
-            ) || warn "Failed to unstick worker-${i} tasks in temp clone"
-            rm -rf "$tmp"
+            if ! git clone "$REPO_DIR" "$tmp" -q 2>&1; then
+                warn "git clone failed for worker-${i} unstick — skipping"
+                rm -rf "$tmp"
+            else
+                (
+                    cd "$tmp"
+                    git config user.email "swarm@local"
+                    git config user.name "Swarm Harness"
+                    local moved=false
+                    local sf
+                    for sf in tasks/active/worker-${i}--*.md; do
+                        [[ -f "$sf" ]] || continue
+                        local tname
+                        tname=$(basename "$sf" | sed "s/worker-${i}--//")
+                        mv "$sf" "tasks/pending/$tname"
+                        moved=true
+                    done
+                    if [[ "$moved" == "true" ]]; then
+                        git add -A
+                        git commit -m "harness: unstick worker-${i} tasks after crash" -q
+                        git push origin main -q
+                    fi
+                ) || warn "Failed to unstick worker-${i} tasks in temp clone"
+                rm -rf "$tmp"
+            fi
             sync_main
         fi
 
@@ -965,14 +973,14 @@ count_files() {
 }
 
 sync_main() {
-    (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+    (cd "$MAIN_DIR" && git pull origin main -q) 2>/dev/null || warn "sync_main: git pull failed"
     sync_remote
 }
 
 # Push local bare repo to remote GitHub repo (no-op if --repo not set)
 sync_remote() {
     [[ -z "$REMOTE_REPO" ]] && return 0
-    (cd "$REPO_DIR" && git push github --all -q 2>/dev/null) || true
+    (cd "$REPO_DIR" && git push github --all -q) 2>/dev/null || warn "sync_remote: git push to github failed"
 }
 
 pending_count() { count_files "$MAIN_DIR/tasks/pending"; }
@@ -1007,7 +1015,9 @@ init_workspace() {
     # Bootstrap with initial structure
     local bootstrap_dir
     bootstrap_dir=$(mktemp -d)
-    git clone "$REPO_DIR" "$bootstrap_dir" -q 2>/dev/null
+    if ! git clone "$REPO_DIR" "$bootstrap_dir" -q 2>&1; then
+        warn "git clone failed during bootstrap"
+    fi
 
     (
         cd "$bootstrap_dir"
@@ -1046,7 +1056,9 @@ PROGEOF
     sync_remote
 
     # Clone the "main" view (read results here)
-    git clone "$REPO_DIR" "$MAIN_DIR" -q 2>/dev/null
+    if ! git clone "$REPO_DIR" "$MAIN_DIR" -q 2>&1; then
+        warn "git clone failed for main working copy"
+    fi
     (
         cd "$MAIN_DIR"
         git config user.email "swarm@local"
@@ -1144,36 +1156,40 @@ main() {
         # ── RESUME: unstick tasks, inject new guidance, run workers ──
 
         # Pull latest state
-        (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+        sync_main
 
         # Return any stuck tasks back to pending
         local unstick_dir
         unstick_dir=$(mktemp -d)
-        git clone "$REPO_DIR" "$unstick_dir" -q 2>/dev/null
-        (
-            cd "$unstick_dir"
-            git config user.email "swarm@local"
-            git config user.name "Swarm Resume"
-            local any_moved=false
-            for sf in tasks/active/worker-*.md; do
-                if [[ -f "$sf" ]]; then
-                    local tname
-                    tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
-                    log "  Returning stuck task: $tname"
-                    mv "$sf" "tasks/pending/$tname"
-                    any_moved=true
+        if ! git clone "$REPO_DIR" "$unstick_dir" -q 2>&1; then
+            warn "git clone failed for unstick — skipping"
+            rm -rf "$unstick_dir"
+        else
+            (
+                cd "$unstick_dir"
+                git config user.email "swarm@local"
+                git config user.name "Swarm Resume"
+                local any_moved=false
+                for sf in tasks/active/worker-*.md; do
+                    if [[ -f "$sf" ]]; then
+                        local tname
+                        tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
+                        log "  Returning stuck task: $tname"
+                        mv "$sf" "tasks/pending/$tname"
+                        any_moved=true
+                    fi
+                done
+                if [[ "$any_moved" == "true" ]]; then
+                    git add -A
+                    git commit -m "resume: return stuck tasks to pending" -q
+                    git push origin main -q
                 fi
-            done
-            if [[ "$any_moved" == "true" ]]; then
-                git add -A
-                git commit -m "resume: return stuck tasks to pending" -q
-                git push origin main -q
-            fi
-        ) || warn "Failed to unstick tasks in temp clone"
-        rm -rf "$unstick_dir"
+            ) || warn "Failed to unstick tasks in temp clone"
+            rm -rf "$unstick_dir"
+        fi
 
         # Sync main view
-        (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+        sync_main
 
         # Augment project if the prompt differs from the original task
         local original_task="${SWARM_TASK:-}"
@@ -1190,7 +1206,7 @@ main() {
             done
             local next_num=$(( max_num + 1 ))
             docker_run_orchestrator "$next_num"
-            (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+            sync_main
 
             # Specialist sweep after augmentation — validate new tasks
             _g_specialist_count=0

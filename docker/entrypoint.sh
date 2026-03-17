@@ -104,7 +104,10 @@ run_orchestrator() {
     echo "=== Orchestrator started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+        echo "FATAL: git clone failed" >> "$log_file"
+        exit 2
+    fi
     cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "orchestrator@swarm"
     git config user.name "Swarm Orchestrator"
@@ -143,7 +146,10 @@ run_reviewer() {
     echo "=== Reviewer ${review_num} started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+        echo "FATAL: git clone failed" >> "$log_file"
+        exit 2
+    fi
     cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "reviewer@swarm"
     git config user.name "Swarm Reviewer"
@@ -178,7 +184,10 @@ run_specialist() {
     echo "=== Specialist ${specialist_name} (${specialist_num}) started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+        echo "FATAL: git clone failed" >> "$log_file"
+        exit 2
+    fi
     cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "${specialist_name}@swarm"
     git config user.name "Swarm ${specialist_name}"
@@ -249,7 +258,7 @@ run_worker() {
 
     while true; do
         # Pull latest state
-        git pull origin main -q 2>/dev/null || true
+        git pull origin main -q 2>>"$log_file" || true
 
         # Count work available
         local pending own_active all_active
