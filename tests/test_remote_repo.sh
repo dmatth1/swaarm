@@ -161,7 +161,7 @@ SCRIPT
 chmod +x "$MOCK_BIN/claude"
 
 local_prompts="$TEST_TMPDIR/prompts"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
 
 # Mock sleep
@@ -222,7 +222,7 @@ SCRIPT
 chmod +x "$MOCK_BIN/sleep"
 
 local_prompts="$TEST_TMPDIR/prompts2"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
 
 mkdir -p "$TEST_TMPDIR/logs"

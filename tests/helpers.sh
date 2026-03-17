@@ -122,6 +122,16 @@ push_file_to_repo() {
     (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
 }
 
+# ─── Mock prompts ─────────────────────────────────────────────
+
+# Create a mock prompts directory with task-format.md (required by entrypoint).
+# Usage: init_mock_prompts <dir>
+init_mock_prompts() {
+    local dir="$1"
+    mkdir -p "$dir"
+    touch "$dir/task-format.md"
+}
+
 # ─── Script loading ──────────────────────────────────────────
 
 # Source the swarm script so its functions are available.

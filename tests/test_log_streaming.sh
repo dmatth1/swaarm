@@ -50,7 +50,7 @@ init_test_workspace
 init_streaming_workspace
 
 local_prompts="$TEST_TMPDIR/prompts"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
 
 push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "add task"
@@ -93,7 +93,7 @@ init_test_workspace
 init_streaming_workspace
 
 local_prompts="$TEST_TMPDIR/prompts"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Test orchestrator prompt for {{TASK}}\n' > "$local_prompts/orchestrator.md"
 
 setup_claude_mock "ORCHESTRATION COMPLETE"
@@ -128,7 +128,7 @@ init_test_workspace
 init_streaming_workspace
 
 local_prompts="$TEST_TMPDIR/prompts"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Inject prompt: {{GUIDANCE}} starting at {{NEXT_TASK_NUM}}\n' > "$local_prompts/inject.md"
 
 setup_claude_mock "INJECTION COMPLETE"
@@ -190,7 +190,7 @@ init_test_workspace
 init_streaming_workspace
 
 local_prompts="$TEST_TMPDIR/prompts"
-mkdir -p "$local_prompts"
+init_mock_prompts "$local_prompts"
 printf 'Test worker prompt for {{AGENT_ID}}\n' > "$local_prompts/worker.md"
 
 push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "add task"

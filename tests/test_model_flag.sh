@@ -18,7 +18,7 @@ init_model_workspace() {
     mkdir -p "$TEST_LOGS"
 
     local prompts_dir="$TEST_TMPDIR/prompts"
-    mkdir -p "$prompts_dir"
+    init_mock_prompts "$prompts_dir"
     printf 'Test worker prompt for {{AGENT_ID}}\n' > "$prompts_dir/worker.md"
     printf 'Inject prompt: {{GUIDANCE}} starting at {{NEXT_TASK_NUM}}\n' > "$prompts_dir/inject.md"
     PROMPTS_DIR="$prompts_dir"

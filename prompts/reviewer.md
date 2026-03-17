@@ -167,10 +167,8 @@ Only update `## Relevant Files` — do not change other sections of pending task
 ### Step 8: Take Corrective Action (if needed)
 
 You may:
-- **Add new task files** to `tasks/pending/` if gaps, integration failures, test failures, or missing work is found
+- **Add new task files** to `tasks/pending/` if gaps, integration failures, test failures, or missing work is found — use the task file format from the **Task Creation Guide** (appended)
 - **Update `## Interfaces`** in SPEC.md if an implementation deviates from the contract in a way that downstream tasks should know about
-
-When adding tasks, lean toward **granular, composable tasks** — one clear purpose per task. A fix task that does one thing is better than a fix task that addresses three issues. Granular tasks parallelize better, fail in isolation, and are easier for workers to complete correctly.
 
 You must **never** remove existing task files (updating `## Relevant Files` on pending tasks is allowed).
 

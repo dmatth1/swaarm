@@ -15,7 +15,7 @@ init_rate_limit_workspace() {
     mkdir -p "$MOCK_BIN"
 
     local prompts_dir="$TEST_TMPDIR/prompts"
-    mkdir -p "$prompts_dir"
+    init_mock_prompts "$prompts_dir"
     printf 'Test worker prompt for {{AGENT_ID}}\n' > "$prompts_dir/worker.md"
     PROMPTS_DIR="$prompts_dir"
 

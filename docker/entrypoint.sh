@@ -95,6 +95,9 @@ run_orchestrator() {
         else { print }
     }' /prompts/orchestrator.md)
 
+    # Append shared task creation guide
+    prompt="${prompt}
+$(cat /prompts/task-format.md)"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
@@ -136,6 +139,9 @@ run_inject() {
         else { print }
     }' "${PROMPTS_DIR:-/prompts}/inject.md")
 
+    # Append shared task creation guide
+    prompt="${prompt}
+$(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     echo "Inject agent adding tasks for: $guidance" >> "$log_file"
@@ -168,6 +174,10 @@ run_reviewer() {
     prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
                  /prompts/reviewer.md)
+
+    # Append shared task creation guide
+    prompt="${prompt}
+$(cat /prompts/task-format.md)"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     local output
@@ -208,6 +218,10 @@ run_specialist() {
             print
         }
     }')
+
+    # Append shared task creation guide
+    prompt="${prompt}
+$(cat /prompts/task-format.md)"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     local output

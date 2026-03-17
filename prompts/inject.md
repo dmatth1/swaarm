@@ -42,37 +42,9 @@ Read completed task files to understand what was built. Read pending task files 
 
 ### 2. Create New Task Files
 
-Create task files in `tasks/pending/`. Start numbering at **{{NEXT_TASK_NUM}}** — do not use any lower number as those are taken.
+Create task files in `tasks/pending/`. Start numbering at **{{NEXT_TASK_NUM}}** — do not use any lower number as those are taken. Use the task file format and rules from the **Task Creation Guide** appended below.
 
-Follow the same task file format as the original orchestrator:
-
-```markdown
-# Task NNN: Task Name
-
-## Description
-What needs to be done. Be specific.
-
-## Produces
-Implements: `InterfaceName` | None
-
-## Consumes
-InterfaceName | None
-
-## Acceptance Criteria
-- [ ] Run: `<exact command>` → Expected: `<exact output>`
-
-## Tests
-- Unit: `tests/test_foo.py::test_bar` — what this validates
-
-## Dependencies
-None | Requires task NNN
-```
-
-Rules:
-- **Granular and composable** — one clear purpose per task. A task that does one thing well is better than a task that does three things. Granular tasks parallelize better, fail in isolation, and are easier for workers to complete correctly.
-- Be specific — vague tasks produce vague results
 - Each task must be completable by reading SPEC.md + the task file alone
-- Set dependencies only where a prior task's output is literally required on disk
 - Update `PROGRESS.md` to add the new tasks to the task list
 
 ### 3. Commit and Push

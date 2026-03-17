@@ -148,7 +148,7 @@ Do **not** duplicate SPEC.md content — CLAUDE.md is for orientation (what exis
 
 ### 4. Create Task Files
 
-Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order.
+Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order. Use the task file format and rules from the **Task Creation Guide** appended below.
 
 **Mandatory — do not omit any of these:**
 - `001-project-setup.md` — create directory structure, init files, install dependencies
@@ -158,119 +158,7 @@ Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Numb
 **Checkpoint task — required for projects with 10 or more tasks:**
 Add one mid-project checkpoint task at roughly the 40–60% mark (e.g., `NNN-integration-checkpoint.md`). It runs the full test suite, verifies that all components built so far wire together correctly, and all subsequent tasks must depend on it. Use `## Produces: None` and `## Consumes: None`.
 
-**Task count:** create as many tasks as the project requires — there is no cap. Lean toward **granular, composable tasks** over large monolithic ones. A task that does one thing well is better than a task that does three things. Granular tasks parallelize better, fail in isolation, and are easier for workers to complete correctly. The right size for a task is one where a worker can complete it by reading SPEC.md (up to `## Interfaces`) plus the task file plus only its `## Relevant Files` and listed interface definitions. If a task would require understanding more than that, split it.
-
-**Task file format:**
-
-```markdown
-# Task NNN: Task Name
-
-## Description
-What needs to be done. Be specific.
-
-## Produces
-Implements: `InterfaceName`
-
-## Consumes
-InterfaceName
-AnotherInterface
-
-## Relevant Files
-Read: `path/to/dependency.py` — why this file matters for this task
-Read: `path/to/integration_point.py` — what the worker needs from it
-Modify: `path/to/existing.py` — what changes are needed
-Create: `path/to/new_file.py` — what this file will contain
-Skip: `path/to/unrelated/` — not needed for this task
-
-## Acceptance Criteria
-- [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
-- [ ] Run: `<exact command>` → Expected: `<exact output or behavior>`
-
-## Tests
-- Unit: `tests/test_foo.py::test_bar` — what this test validates
-- Unit: `tests/test_foo.py::test_baz_invalid_input` — edge case description
-- Integration: `tests/test_foo_integration.py::test_foo_wires_with_bar` — what boundary this validates
-None (for setup/infra tasks that produce no testable logic)
-
-## Technical Details
-- Function signatures, API routes, data schemas
-- Commands to run (e.g., `pip install X`, `go mod init`)
-- Any specific implementation requirements
-
-## Dependencies
-None | Requires task 001 | Requires tasks 001, 002
-```
-
-**`## Produces` rules:**
-- Names the interface from SPEC.md `## Interfaces` that this task implements
-- Write `None` (bare word, no backticks, on the line after the header) if this task produces no named interface — e.g., project setup, testing tasks, integration tasks
-
-**`## Consumes` rules:**
-- Lists interface names from SPEC.md `## Interfaces`, one per line
-- Write `None` (bare word, no backticks, on the line after the header) if this task has no interface dependencies
-- Workers read these interface definitions from SPEC.md after claiming the task
-
-**`## Tests` rules:**
-- Specify exact test file paths and test function names the worker must write
-- Use prefixes: `Unit:` for isolated logic, `Integration:` for cross-component boundaries, `E2E:` for full-stack flows
-- Write `None` only for tasks that produce no testable logic (project setup, test infrastructure itself, documentation)
-- Be specific enough that the worker knows exactly what scenarios to cover — don't write "add tests"; write what the tests must verify
-- Integration tasks and the final verification task should include E2E criteria
-
-**`## Relevant Files` rules:**
-- List every file the worker should read, modify, or create — with a brief annotation explaining why
-- Prefixes: `Read:` (context only), `Modify:` (change existing file), `Create:` (new file), `Skip:` (explicitly irrelevant — use for large directories workers might waste time exploring)
-- This is a hint, not a hard constraint — workers may explore beyond the list if needed, but most tasks should not require it
-- For setup tasks (001, 002), this section can be minimal since there's no existing codebase yet
-- Keep the list focused: 3–8 entries is typical. If you need more than 10, the task may be too large — split it
-
-**`## Acceptance Criteria` rules:**
-- Every criterion must be expressed as a concrete, runnable command and its expected output
-- Format: `Run: <exact shell command in project directory>` → `Expected: <exact output, exit code, or observable behavior>`
-- Examples:
-  - `Run: python -m pytest tests/test_auth.py -q` → `Expected: all tests pass, exit 0`
-  - `Run: curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health` → `Expected: 200`
-  - `Run: python -c "from src.db import get_session; print('ok')"` → `Expected: ok`
-- Do NOT write criteria like "function exists" or "code is correct" — those are not verifiable
-
-### 5. Insert Integration Tasks
-
-When designing a downstream task whose `## Consumes` would list 3 or more entries, insert an integration task before it instead:
-
-1. Create an integration task (e.g., `050-integration-data-layer.md`) that:
-   - Lists all the component tasks it validates in `## Dependencies`
-   - Runs smoke tests that verify the components wire together correctly
-   - Has `## Produces` and `## Consumes` both set to `None`
-2. The downstream task then depends on the integration task (not the individual component tasks), reducing its `## Consumes`
-
-Integration tasks always have:
-```markdown
-## Produces
-None
-
-## Consumes
-None
-```
-
-Only non-integration tasks count toward the 3-entry threshold.
-
-Example for a full-stack app:
-- `001`–`004` build DB models, migrations, connection pool
-- `005-integration-data-layer.md` smoke-tests the DB foundation (depends on 001–004)
-- `006`–`012` build API routes, auth, middleware (depend on 005, not 001–004 individually)
-- `013-integration-api-layer.md` smoke-tests the full API (depends on 006–012)
-
-### 6. Verify the Dependency Graph
-
-Before finalizing, audit every task's `## Dependencies`:
-
-**a) No cycles.** For each task, trace its full chain: if task A → B → C → A (or any shorter cycle), you have a deadlock. Workers will stall and the build will never finish. Break cycles by restructuring tasks or splitting work differently.
-
-**b) No spurious dependencies.** For each dependency you listed, ask: "Can a worker actually write the code for this task without the prior task's files existing on disk?" If yes, remove the dependency — it is unnecessary and slows parallelism. Only keep a dependency when the prior task produces a file, schema, or compiled artifact that is literally imported or consumed at build time.
-
-**c) Verify parallelism.** After removing spurious dependencies, count how many tasks at each "depth level" of the graph can run in parallel. If nearly all tasks form a single chain, you have a bottleneck — reconsider whether those serial dependencies are truly required.
-
-### 7. Update PROGRESS.md
+### 5. Update PROGRESS.md
 
 ```markdown
 # Progress
@@ -288,7 +176,7 @@ Before finalizing, audit every task's `## Dependencies`:
 [Any important context for workers]
 ```
 
-### 8. Commit and Push
+### 6. Commit and Push
 
 ```bash
 git add -A
@@ -301,13 +189,11 @@ git push origin main
 ## Rules
 
 - **Be specific** — vague tasks produce vague results. Include file paths, function names, CLI commands.
-- **Tasks are the right size when** a worker can complete them reading only SPEC.md (up to `## Interfaces`) + the task file + its listed interface definitions. Split anything larger.
-- **No circular dependencies** — trace every dependency chain before committing to the task list.
-- **Avoid dependencies where possible** — only add a dependency when the prior task's output is literally required on disk to proceed.
 - **Include setup first** — task 001 should always set up the project skeleton so other tasks have a foundation.
 - **Include verification last** — the final task must run the full project and confirm success. Do not omit it.
 - **Pick standard, well-known libraries** — don't over-engineer; use what works.
 - **`## Interfaces` then `## Specialists`** — workers stop reading at `## Interfaces`; specialists are defined after it and run automatically by the harness alongside workers.
+- See the **Task Creation Guide** (appended) for task format, field rules, granularity, and dependency guidelines.
 
 ---
 
