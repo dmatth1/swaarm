@@ -108,11 +108,11 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Worker exits immediately | `set -e` on missing dir | `.gitkeep` + `\|\| echo 0` on find |
-| Task stuck in `active/` | Worker crashed | `./swarm resume` |
+| Task stuck in `active/` | Worker crashed | `./swarm "Continue" -o <dir>` |
 | Orchestrator creates 0 tasks | Prompt not followed | Check `logs/orchestrator.log` |
 | `((failed++))` exits silently | `set -e` + arithmetic 0 | `((failed++)) \|\| true` |
 | Container exits immediately | Auth failed | Verify `Claude Code-credentials` in macOS Keychain or `~/.claude/credentials.json` on Linux |
-| Workers sleeping, no progress | Rate limit hit | Automatic — workers back off and retry; or `./swarm resume` to restart manually |
+| Workers sleeping, no progress | Rate limit hit | Automatic — workers back off and retry; or `./swarm "Continue" -o <dir>` to restart manually |
 | Orphaned containers | EXIT trap missed | `docker ps -a --filter name=swarm-` |
 
 ## Testing and Development Cleanup

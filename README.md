@@ -196,7 +196,7 @@ Workers coordinate through the local bare repo (fast). The harness pushes to Git
 ./swarm kill ./swarm-20240115-143022 worker-2
 ```
 
-After killing, run `./swarm resume <dir>` to restart workers on remaining tasks. No manual git manipulation needed.
+After killing, run `./swarm "Continue" -o <dir>` to restart workers on remaining tasks. No manual git manipulation needed.
 
 ## How the git lock works
 
@@ -232,7 +232,7 @@ The orchestrator failed before creating tasks. Check `logs/orchestrator.log`. Th
 Previously caused by empty `tasks/active/` and `tasks/done/` dirs not being tracked by git, causing workers to crash on missing paths. Fixed with `.gitkeep` files in bootstrap. If you see this on an older version, update.
 
 **Worker stuck in `tasks/active/` indefinitely**
-The worker likely crashed mid-task. Check `logs/worker-N.log`, then run `./swarm resume <dir>` — it moves stuck tasks back to pending and restarts workers automatically.
+The worker likely crashed mid-task. Check `logs/worker-N.log`, then run `./swarm "Continue" -o <dir>` — it moves stuck tasks back to pending and restarts workers automatically.
 
 **"git push rejected"**
 This is normal — another worker claimed the same task first. Workers handle this automatically by pulling and picking a different task.
