@@ -58,6 +58,8 @@ You: ./swarm "Build a todo REST API" --agents 3
   Your project, complete in main/
 ```
 
+Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 10 completions, a **quiet period** pauses workers for a full review + specialist sweep (code quality, reliability, test coverage, performance, documentation, project management).
+
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 
 ## vs. the Anthropic blog post
@@ -119,6 +121,7 @@ Options:
 swarm-20240115-143022/
 ├── main/                    ← YOUR PROJECT IS HERE
 │   ├── SPEC.md              ← Full spec written by orchestrator
+│   ├── CLAUDE.md            ← Living project index (auto-loaded by workers)
 │   ├── PROGRESS.md          ← Progress log
 │   ├── tasks/
 │   │   ├── pending/         ← NNN-taskname.md files waiting to be claimed
@@ -128,7 +131,8 @@ swarm-20240115-143022/
 ├── logs/
 │   ├── orchestrator.log
 │   ├── worker-1.log
-│   └── worker-2.log
+│   ├── worker-2.log
+│   └── reviewer.log
 ├── pids/
 │   ├── worker-1.cid         ← Docker container ID, cleaned up when worker exits
 │   └── worker-2.cid
@@ -156,7 +160,7 @@ watch -n 5 'ls swarm-*/main/tasks/done/'
 
 ## Resuming and adding guidance
 
-Point `-o` at an existing swarm output directory to resume. You can provide new guidance in the prompt — the inject agent will create additional tasks:
+Point `-o` at an existing swarm output directory to resume. You can provide new guidance in the prompt — the orchestrator runs in augment mode to create additional tasks:
 
 ```bash
 # Resume after crash/rate-limit
@@ -171,8 +175,9 @@ Point `-o` at an existing swarm output directory to resume. You can provide new 
 
 Resume automatically:
 1. Moves any stuck `tasks/active/worker-N--*.md` files back to `tasks/pending/`
-2. If the prompt differs from the original task, injects new tasks via the inject agent
-3. Spawns fresh workers to finish remaining + new tasks
+2. If new guidance is provided, runs the orchestrator in augment mode — it reads the existing SPEC.md and codebase, updates the spec, and creates new tasks
+3. Runs a specialist sweep after augmentation (exclusive repo access)
+4. Spawns fresh workers to finish remaining + new tasks
 
 **Rate limits are handled automatically.** Workers detect rate-limit responses from Claude — both API-level 429 errors and account-level usage caps ("You've hit your limit") — and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter). No intervention needed.
 
@@ -246,8 +251,11 @@ Edit the prompts to change how agents approach tasks:
 
 - `prompts/orchestrator.md` — controls task decomposition: how many tasks, how detailed, what tech stack preferences, naming conventions
 - `prompts/worker.md` — controls how workers claim tasks, write code, handle blockers, structure commits
+- `prompts/reviewer.md` — controls how the reviewer validates work, runs tests, and manages task quality
+- `prompts/specialist.md` — controls specialist agent behavior (code quality sweeps)
+- `prompts/task-format.md` — shared task creation guide appended to all task-creating agents at runtime
 
-Both files use `{{TASK}}` and `{{AGENT_ID}}` placeholders substituted at runtime. You can specialize these for a domain — e.g., always use TypeScript, always write tests first, always target a specific framework.
+Prompts use `{{TASK}}` and `{{AGENT_ID}}` placeholders substituted at runtime. You can specialize these for a domain — e.g., always use TypeScript, always write tests first, always target a specific framework.
 
 ## swarm vs Claude Code Agent Teams
 
@@ -265,7 +273,7 @@ Claude Code has a native [agent teams feature](https://code.claude.com/docs/en/a
 | **Resume** | `./swarm -o <dir>` — fully recoverable | `/resume` does not restore teammates |
 | **Remote push** | `--repo` mirrors to GitHub automatically | No built-in remote push |
 | **Visibility** | Log files, `status` command, `logs` tail | tmux split panes / Shift+Down |
-| **Human steering** | Not needed (but `inject` adds guidance mid-run) | Redirect agents mid-task, message teammates directly |
+| **Human steering** | Not needed (but resume with new prompt adds guidance mid-run) | Redirect agents mid-task, message teammates directly |
 | **Token cost** | Lower (stateless sessions, re-reads git each turn) | Higher (each teammate has persistent full context) |
 | **Best for** | Automated pipelines, unattended runs, CI | Interactive development, research, code review |
 

@@ -85,15 +85,15 @@ All logging is line-based text. Machine-readable events would enable automation 
 ## Done
 
 ### Stream worker logs to a centralized source
-- [x] All roles (worker, orchestrator, reviewer, specialist, inject) use `tee -a` for real-time log streaming
+- [x] All roles (worker, orchestrator, reviewer, specialist) use `tee -a` for real-time log streaming
 - [x] `./swarm logs <output-dir> [worker-N]` subcommand added (wraps `tail -f`)
-- [x] Tests: `tests/test_log_streaming.sh` (11 tests), `tests/test_logs.sh` (6 tests)
+- [x] Tests: `tests/test_log_streaming.sh` (5 tests), `tests/test_logs.sh` (4 tests)
 
 ### Allow specifying the claude model when launching or resuming
 - [x] `--model` flag on `./swarm` and `./swarm resume`
 - [x] Stored as `SWARM_MODEL` in `swarm.state`, restored on resume
 - [x] Passed to all `docker_run_*` as `MODEL` env var, then `--model` to claude CLI
-- [x] Tests: `tests/test_model_flag.sh` (12 tests)
+- [x] Tests: `tests/test_model_flag.sh` (7 tests)
 
 ### Task-scoped file manifests
 - [x] Orchestrator includes `## Relevant Files` section in task file format (Read/Modify/Create/Skip prefixes with annotations)
@@ -110,7 +110,7 @@ All logging is line-based text. Machine-readable events would enable automation 
 
 ### Octal parsing bug with zero-padded task numbers
 - [x] Audited all 3 `grep -o '^[0-9]*'` → `[[ ]]` patterns — all use `$((10#$num))`
-- [x] Test: `tests/test_inject.sh` test 5 covers task numbers 008, 009, 018, 019
+- [x] Test was in `test_inject.sh` (deleted with inject deprecation) — test coverage lost, covered by code audit
 
 ### Quiet periods for reviewer/specialist sweeps
 - [x] Every N completions (default 10, `QUIET_PERIOD_INTERVAL`), pause workers via `docker pause`
@@ -120,9 +120,20 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Workers resume via `docker unpause` after quiet period
 - [x] Per-task reviews use `quick` mode (tests only, skip CLAUDE.md/manifest updates and task restructuring)
 - [x] Reviewer prompt supports `{{REVIEW_MODE}}` (quick/full) and `--full-review--` COMPLETED_TASK
-- [x] Tests: `tests/test_quiet_periods.sh` (16 tests)
+- [x] Tests: `tests/test_quiet_periods.sh` (8 tests)
+
+### Deprecate inject agent
+- [x] Removed `prompts/inject.md`, `run_inject()`, `docker_run_inject()`, `cmd_inject()`
+- [x] Resume with guidance now runs orchestrator in augment mode (reads existing codebase, updates SPEC.md, creates new tasks)
+- [x] Specialist sweep runs after orchestrator augment (not on plain resume)
+- [x] All tests updated: unified_command, log_streaming, model_flag
+
+### Specialist roster refinement
+- [x] Added QAEngineer and PerformanceEngineer as default specialists
+- [x] Removed DataScientist as default (too domain-specific)
+- [x] Sharpened SystemsDesignExpert vs PerformanceEngineer boundary (reliability/correctness vs speed/throughput)
 
 ### E2E integration test
 - [x] Mock claude does real git operations (claim, complete, push) without API tokens
-- [x] 8 scenarios: full lifecycle (3 tasks, 2 workers), git conflict resolution, crash recovery, inject agent, log streaming, review loop with real worker entrypoint, rate limit backoff, task ordering
-- [x] Tests: `tests/test_e2e.sh` (26 tests)
+- [x] 10 scenarios: full lifecycle, git conflict resolution, crash recovery, orchestrator augment, log streaming, review loop, rate limit backoff, task ordering, resume, specialist sweep
+- [x] Tests: `tests/test_e2e.sh` (10 tests)
