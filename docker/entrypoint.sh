@@ -138,13 +138,13 @@ $(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
 run_reviewer() {
     local completed_task="${COMPLETED_TASK:-}"
     local review_num="${REVIEW_NUM:-0}"
-    local log_file="/logs/reviewer-${review_num}.log"
+    local log_file="${LOGS_DIR:-/logs}/reviewer-${review_num}.log"
 
     echo "=== Reviewer ${review_num} started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone /upstream /workspace -q 2>/dev/null
-    cd /workspace
+    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "reviewer@swarm"
     git config user.name "Swarm Reviewer"
 
@@ -152,11 +152,11 @@ run_reviewer() {
     local prompt
     prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
-                 /prompts/reviewer.md)
+                 "${PROMPTS_DIR:-/prompts}/reviewer.md")
 
     # Append shared task creation guide
     prompt="${prompt}
-$(cat /prompts/task-format.md)"
+$(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     run_claude "$prompt" "$log_file"
@@ -173,13 +173,13 @@ run_specialist() {
     local specialist_name="${SPECIALIST_NAME:-specialist}"
     local specialist_role="${SPECIALIST_ROLE:-}"
     local specialist_num="${SPECIALIST_NUM:-0}"
-    local log_file="/logs/specialist-${specialist_name}-${specialist_num}.log"
+    local log_file="${LOGS_DIR:-/logs}/specialist-${specialist_name}-${specialist_num}.log"
 
     echo "=== Specialist ${specialist_name} (${specialist_num}) started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    git clone /upstream /workspace -q 2>/dev/null
-    cd /workspace
+    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "${specialist_name}@swarm"
     git config user.name "Swarm ${specialist_name}"
 
@@ -187,7 +187,7 @@ run_specialist() {
     local prompt
     prompt=$(sed -e "s|{{SPECIALIST_NAME}}|${specialist_name}|g" \
                  -e "s|{{SPECIALIST_NUM}}|${specialist_num}|g" \
-                 /prompts/specialist.md)
+                 "${PROMPTS_DIR:-/prompts}/specialist.md")
     # Inject role (may contain newlines and special chars — awk -v handles literal assignment)
     prompt=$(echo "$prompt" | awk -v role="$specialist_role" '{
         if ($0 ~ /\{\{SPECIALIST_ROLE\}\}/) {
@@ -200,7 +200,7 @@ run_specialist() {
 
     # Append shared task creation guide
     prompt="${prompt}
-$(cat /prompts/task-format.md)"
+$(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
 
     run_claude "$prompt" "$log_file"
