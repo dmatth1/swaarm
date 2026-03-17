@@ -4,27 +4,18 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
-
 ### stuck detection skips when done_count = 0
 **Bug** · `swarm:796`
 The stuck-state detector (pending > 0, active = 0) only fires when at least one task is already done. If workers repeatedly crash before completing any task, the project idles forever with no reviewer triggered and no recovery.
 - [ ] Remove or relax the `done_count() -gt 0` guard
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering `pending > 0, active = 0, done = 0`
 
-
-### Reviewer does not verify task artifact compliance
-**Bug** · `prompts/orchestrator.md` — **Fixed**
-The reviewer checks if tests pass, but does not verify that workers actually produced the artifacts required by task acceptance criteria (e.g. screenshots, test output files, verification reports). Workers can mark tasks DONE while skipping required verification steps. Discovered during ProQ4 run where 11 UI tasks were completed without any Xvfb screenshot evidence despite task descriptions requiring it.
-- [x] Orchestrator augment mode checks acceptance criteria for required artifacts
-- [x] If required artifacts are missing, orchestrator creates a fix task
-- [x] Test: `test_quiet_periods.sh` Test 9 — TESTS_FAIL → orchestrator fix task → TESTS_PASS
-
+### Git clone failure causes infinite respawn loop
+If a worker's initial `git clone` fails (repo corruption, disk full), the worker exits, `check_and_respawn_dead_workers()` sees the stuck task and respawns — which also fails. Infinite loop.
+- [ ] Validate git clone success in entrypoint.sh before entering worker loop
+- [ ] Cap respawn attempts per worker
 
 ## P2 — Should fix
-
-### cmd_kill has no tests
-`cmd_kill` (swarm:220) is completely untested. Covers: kill specific worker by ID, kill all workers, missing pids dir error, docker stop/rm failures.
-- [ ] Add `tests/test_kill.sh`
 
 ### Silent git failures in critical paths
 Git clone/push/pull operations throughout the script are silenced with `2>/dev/null` or `|| true`. When they fail (e.g. during unstick or respawn), tasks stay stuck with no error message.
@@ -32,29 +23,35 @@ Git clone/push/pull operations throughout the script are silenced with `2>/dev/n
 - [ ] Add error checking on critical paths (unstick, respawn, bootstrap)
 - [ ] Log failures instead of swallowing them
 
+### Auto-fallback to alternate model on 529 overload errors
+When workers hit repeated 529 (overloaded) errors, they currently just backoff and retry the same model indefinitely. A smarter approach would detect sustained overload and automatically switch to a fallback model (e.g. opus → sonnet → haiku) until the primary recovers.
+- [ ] Detect 529 separately from rate-limit (429) in worker error handling
+- [ ] After N consecutive 529s, switch `CLAUDE_MODEL_FLAG` to a fallback model
+- [ ] Restore primary model after successful response (or on next container restart)
+- [ ] Make fallback chain configurable (e.g. `--fallback-model sonnet`)
+- [ ] Consider harness-level detection: if all workers are 529-looping, kill and resume with fallback
+
+### cmd_kill has no tests
+`cmd_kill` (swarm:220) is completely untested. Covers: kill specific worker by ID, kill all workers, missing pids dir error, docker stop/rm failures.
+- [ ] Add `tests/test_kill.sh`
+
+## P3 — Later (cloud prep)
+
 ### Cost/token tracking
 No visibility into how many API tokens a swarm run consumed. Useful for budgeting and optimizing task breakdown.
 - [ ] Capture claude CLI token usage output per invocation
 - [ ] Aggregate and report totals at run completion
 
-### Git clone failure causes infinite respawn loop
-If a worker's initial `git clone` fails (repo corruption, disk full), the worker exits, `check_and_respawn_dead_workers()` sees the stuck task and respawns — which also fails. Infinite loop.
-- [ ] Validate git clone success in entrypoint.sh before entering worker loop
-- [ ] Cap respawn attempts per worker
-
-## P3 — Later (cloud prep)
+### No tests for worker sudo/apt-get capability in Docker
+Workers can now `sudo apt-get install` packages at runtime (e.g. xvfb, imagemagick) — but there are no tests verifying this works. A broken sudoers config or missing `sudo` package in the image would cause silent failures where workers skip visual verification steps.
+- [ ] Add `tests/test_docker_sudo.sh` — verify `swarm` user can run `sudo apt-get install -y <pkg>` inside a container built from the current Dockerfile
+- [ ] Test that a worker entrypoint can install and invoke `xvfb-run` successfully
+- [ ] Run as part of CI after any Dockerfile change
 
 ### Timeouts on git and claude operations
 All git and claude CLI calls have no timeout. A hung network connection blocks the worker forever. Matters more on unreliable cloud networks.
 - [ ] Add timeout wrappers around git operations (10-30s)
 - [ ] Add timeout on claude CLI invocations (configurable, default 5m)
-
-### Log rotation
-- [x] `truncate_log()` in `docker/entrypoint.sh` caps log files after each `run_claude()` call
-- [x] Default 10MB cap (`MAX_LOG_SIZE=10485760`); set `MAX_LOG_SIZE=0` to disable
-- [x] Truncation keeps the tail (most recent output), prepends a `[log truncated...]` marker
-- [x] Cross-platform: `stat -f%z` (macOS) / `stat -c%s` (Linux) with `|| echo 0` fallback
-- [x] Tests: `tests/test_log_streaming.sh` (3 new tests, total 16)
 
 ### Docker memory limits on containers
 No memory limits on worker containers. A worker generating OOM-inducing code can take down the host.
@@ -76,6 +73,18 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [ ] Remove sequential exception from `run_tests.sh`
 
 ## Done
+
+### Reviewer artifact compliance
+- [x] Orchestrator augment mode checks acceptance criteria for required artifacts
+- [x] If required artifacts are missing, orchestrator creates a fix task
+- [x] Test: `test_quiet_periods.sh` Test 9 — TESTS_FAIL → orchestrator fix task → TESTS_PASS
+
+### Log rotation
+- [x] `truncate_log()` in `docker/entrypoint.sh` caps log files after each `run_claude()` call
+- [x] Default 10MB cap (`MAX_LOG_SIZE=10485760`); set `MAX_LOG_SIZE=0` to disable
+- [x] Truncation keeps the tail (most recent output), prepends a `[log truncated...]` marker
+- [x] Cross-platform: `stat -f%z` (macOS) / `stat -c%s` (Linux) with `|| echo 0` fallback
+- [x] Tests: `tests/test_log_streaming.sh` (3 new tests, total 16)
 
 ### Real-time log streaming for all roles
 - [x] `run_claude()` uses `claude -p --output-format stream-json --include-partial-messages` — tokens stream as they arrive, no PTY needed
