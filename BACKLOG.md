@@ -19,9 +19,6 @@ The stuck-state detector (pending > 0, active = 0) only fires when at least one 
 - [ ] Remove or relax the `done_count() -gt 0` guard
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering `pending > 0, active = 0, done = 0`
 
-### E2E integration test
-No test exercises the full coordination loop end-to-end. Approach: override `docker_run_*` functions to run `bash docker/entrypoint.sh` directly (bypassing Docker), with mock claude scripts that perform the actual git operations (create tasks, claim, complete). Would test orchestrator → worker race → reviewer → ALL_COMPLETE with real git.
-- [ ] Implement `tests/test_e2e.sh` with 3 tasks + 2 workers
 
 ### Reviewer does not verify task artifact compliance
 **Bug** · `prompts/reviewer.md` — **Fixed (prompt change)**
@@ -119,3 +116,8 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Per-task reviews use `quick` mode (tests only, skip CLAUDE.md/manifest updates and task restructuring)
 - [x] Reviewer prompt supports `{{REVIEW_MODE}}` (quick/full) and `--full-review--` COMPLETED_TASK
 - [x] Tests: `tests/test_quiet_periods.sh` (16 tests)
+
+### E2E integration test
+- [x] Mock claude does real git operations (claim, complete, push) without API tokens
+- [x] 8 scenarios: full lifecycle (3 tasks, 2 workers), git conflict resolution, crash recovery, inject agent, log streaming, review loop with real worker entrypoint, rate limit backoff, task ordering
+- [x] Tests: `tests/test_e2e.sh` (26 tests)
