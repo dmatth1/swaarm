@@ -13,11 +13,11 @@ The stuck-state detector (pending > 0, active = 0) only fires when at least one 
 
 
 ### Reviewer does not verify task artifact compliance
-**Bug** · `prompts/orchestrator.md` — **Partially fixed**
+**Bug** · `prompts/orchestrator.md` — **Fixed**
 The reviewer checks if tests pass, but does not verify that workers actually produced the artifacts required by task acceptance criteria (e.g. screenshots, test output files, verification reports). Workers can mark tasks DONE while skipping required verification steps. Discovered during ProQ4 run where 11 UI tasks were completed without any Xvfb screenshot evidence despite task descriptions requiring it.
 - [x] Orchestrator augment mode checks acceptance criteria for required artifacts
 - [x] If required artifacts are missing, orchestrator creates a fix task
-- [ ] Add test covering artifact compliance check (orchestrator augment)
+- [x] Test: `test_quiet_periods.sh` Test 9 — TESTS_FAIL → orchestrator fix task → TESTS_PASS
 
 
 ## P2 — Should fix

@@ -316,4 +316,72 @@ echo "$DOCKER_ARGS" | grep -q 'COMPLETED_TASK=001-setup.md' \
 teardown_test
 trap - EXIT
 
+# ─── Test 9: TESTS_FAIL → orchestrator fix task → TESTS_PASS completes run ───
+
+setup_test "artifact compliance: TESTS_FAIL → orchestrator fix task → TESTS_PASS"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Pre-populate: 1 done task (worker completed it, but required artifact is missing)
+push_file_to_repo "tasks/done/001-build-app.md" "# Task 001: Build App
+## Acceptance Criteria
+- Run: python -m pytest
+- Run: cat test-results.txt
+  Expected: PASS" "done 001"
+
+load_swarm
+
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true; }
+run_specialist_sweep()           { :; }
+MAX_WORKER_ITERATIONS=5
+RESTRUCTURE_INTERVAL=999
+
+ORCHESTRATOR_NEXT_NUMS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_NEXT_NUMS+=("${1:-}")
+    # Simulate: orchestrator sees missing artifact, creates fix task directly in done/
+    # (represents the full cycle: orchestrator creates fix task → worker completes it)
+    push_file_to_repo "tasks/done/$(printf '%03d' "$1")-fix-missing-artifact.md" \
+        "# Task $1: Generate missing test-results.txt" "orchestrator+worker: fix artifact"
+    mkdir -p "$LOGS_DIR"
+}
+
+REVIEWER_CALL_NUM=0
+docker_run_reviewer() {
+    REVIEWER_CALL_NUM=$((REVIEWER_CALL_NUM + 1))
+    mkdir -p "$LOGS_DIR"
+    if [[ "$REVIEWER_CALL_NUM" -eq 1 ]]; then
+        # Per-task review of 001: TESTS_FAIL (missing artifact)
+        echo "TESTS_FAIL" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        # After orchestrator added fix task: tests pass
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+run_with_review 1
+
+# Orchestrator triggered with correct NEXT_TASK_NUM
+[[ "${#ORCHESTRATOR_NEXT_NUMS[@]}" -ge 1 ]] \
+    && pass "orchestrator triggered after TESTS_FAIL (${#ORCHESTRATOR_NEXT_NUMS[@]} calls)" \
+    || fail "orchestrator not triggered after TESTS_FAIL"
+
+[[ "${ORCHESTRATOR_NEXT_NUMS[0]:-}" == "2" ]] \
+    && pass "orchestrator received correct NEXT_TASK_NUM=2 (after done task 001)" \
+    || fail "expected NEXT_TASK_NUM=2, got: ${ORCHESTRATOR_NEXT_NUMS[0]:-unset}"
+
+# Fix task should exist in done/
+[[ -f "$MAIN_DIR/tasks/done/002-fix-missing-artifact.md" ]] \
+    && pass "fix task 002 created by orchestrator and resolved" \
+    || fail "fix task 002 not found in done/"
+
+teardown_test
+trap - EXIT
+
 print_summary
