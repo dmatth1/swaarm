@@ -4,6 +4,14 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
+### Use CLAUDE.md as a living project index to reduce worker orientation cost
+Every worker invocation starts cold — re-reads SPEC.md, scans the task queue, explores the codebase. As projects grow past 15-20 tasks, workers spend significant tokens just getting oriented. Claude Code already reads `CLAUDE.md` automatically on every invocation, so use it as the project index.
+- [ ] Orchestrator creates an initial `CLAUDE.md` alongside SPEC.md (project structure, tech stack, key interfaces, file layout)
+- [ ] Reviewer updates `CLAUDE.md` after each task completion (new files, changed interfaces, architectural decisions made by workers)
+- [ ] Keep `CLAUDE.md` under 200 lines — compact when it grows, preserving only current state (not history)
+- [ ] Add task-scoped file manifests: orchestrator lists relevant files per task so workers skip the "scan everything" phase
+- [ ] Update orchestrator and reviewer prompts accordingly
+
 ### Worker logs don't stream during claude session
 **Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
 Worker logs show the startup header (`Worker N started`, `State: pending=X`) but then go silent for 15-30 minutes until the claude session completes and dumps all output at once. Root cause: `claude -p` detects stdout is a pipe and block-buffers (Node.js default for non-TTY stdout). `tee -a` only helps if the upstream process writes incrementally.
