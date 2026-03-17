@@ -13,13 +13,11 @@ The stuck-state detector (pending > 0, active = 0) only fires when at least one 
 
 
 ### Reviewer does not verify task artifact compliance
-**Bug** · `prompts/reviewer.md` — **Fixed (prompt change)**
-The reviewer checks if code compiles and unit tests pass, but does not verify that workers actually produced the artifacts required by task acceptance criteria (e.g. screenshots, test output files, verification reports). Workers can mark tasks DONE while skipping required verification steps. Discovered during ProQ4 run where 11 UI tasks were completed without any Xvfb screenshot evidence despite task descriptions requiring it.
-- [x] Update reviewer prompt to parse acceptance criteria for required artifacts (files, screenshots, test outputs)
-- [x] Reviewer checks `git log --name-only` for expected committed files
-- [x] If required artifacts are missing, reviewer creates a fix task
-- [x] ALL_COMPLETE gated on all required artifacts being committed
-- [ ] Add test to `tests/test_reviewer_loop.sh` covering artifact compliance check
+**Bug** · `prompts/orchestrator.md` — **Partially fixed**
+The reviewer checks if tests pass, but does not verify that workers actually produced the artifacts required by task acceptance criteria (e.g. screenshots, test output files, verification reports). Workers can mark tasks DONE while skipping required verification steps. Discovered during ProQ4 run where 11 UI tasks were completed without any Xvfb screenshot evidence despite task descriptions requiring it.
+- [x] Orchestrator augment mode checks acceptance criteria for required artifacts
+- [x] If required artifacts are missing, orchestrator creates a fix task
+- [ ] Add test covering artifact compliance check (orchestrator augment)
 
 
 ## P2 — Should fix
@@ -106,13 +104,13 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] Audited all 3 `grep -o '^[0-9]*'` → `[[ ]]` patterns — all use `$((10#$num))`
 - [x] Test was in `test_inject.sh` (deleted with inject deprecation) — test coverage lost, covered by code audit
 
-### Periodic full reviews + specialist sweeps
-- [x] Every N completions (default 10, `QUIET_PERIOD_INTERVAL`), full reviewer + specialist sweep run concurrently with workers
-- [x] Full reviewer (`--full-review--` mode) has restructuring powers (CLAUDE.md, manifests, task reordering)
-- [x] Per-task reviews use `quick` mode (tests only, skip CLAUDE.md/manifest updates and task restructuring)
-- [x] Reviewer prompt supports `{{REVIEW_MODE}}` (quick/full) and `--full-review--` COMPLETED_TASK
-- [x] Previously used `docker pause`/`unpause` — reverted to concurrent model (no worker idle time, git conflicts handled by rebase)
-- [x] Tests: `tests/test_quiet_periods.sh` (8 tests)
+### Periodic orchestrator + specialist sweeps
+- [x] Every N completions (default 10, `RESTRUCTURE_INTERVAL`), orchestrator runs in augment mode + specialist sweep concurrently with workers
+- [x] Orchestrator handles: BLOCKED tasks, stale pending task manifests, CLAUDE.md/SPEC.md updates, test failures, gaps
+- [x] Reviewer simplified to pure test runner (TESTS_PASS/TESTS_FAIL only) — no restructuring powers
+- [x] TESTS_FAIL from reviewer triggers orchestrator immediately (doesn't wait for next interval)
+- [x] Stuck state and BLOCKED tasks now handled by orchestrator (not reviewer)
+- [x] Tests: `tests/test_quiet_periods.sh` (11 tests), `tests/test_e2e.sh` includes Tests 11–13
 
 ### Deprecate inject agent
 - [x] Removed `prompts/inject.md`, `run_inject()`, `docker_run_inject()`, `cmd_inject()`
@@ -128,4 +126,4 @@ All logging is line-based text. Machine-readable events would enable automation 
 ### E2E integration test
 - [x] Mock claude does real git operations (claim, complete, push) without API tokens
 - [x] 10 scenarios (32 assertions): full lifecycle, crash recovery, log streaming, rate limit, task ordering, resume without prompt, resume with prompt (orchestrator augment + post-augment sweep), specialist parsing, pre-flight sweep, quiet period sweep
-- [x] Tests: `tests/test_e2e.sh` (32 tests)
+- [x] Tests: `tests/test_e2e.sh` (36 tests)
