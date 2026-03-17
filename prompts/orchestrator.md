@@ -30,7 +30,7 @@ Directory structure:
 
 ### 0. Determine Mode
 
-Check whether this is a **new project** or an **augmentation** of an existing one:
+Check the project state to determine what kind of work is needed:
 
 ```bash
 ls tasks/done/ tasks/pending/ tasks/active/ 2>/dev/null
@@ -38,7 +38,17 @@ cat SPEC.md 2>/dev/null | head -5
 ```
 
 - If `SPEC.md` is a stub or missing and no tasks exist → **new project mode** (do all steps below)
-- If `SPEC.md` has real content and tasks exist → **augment mode** (skip to Step 1A below)
+- If `SPEC.md` has real content and tasks exist → **existing project mode** (skip to Step 1A below)
+
+**In existing project mode**, determine your focus by reading the project state:
+
+1. Are there `BLOCKED-*.md` files in `tasks/pending/`? → unblock them
+2. Are tests failing? → create fix tasks
+3. Are pending tasks stale, too large, or missing file manifests? → fix them
+4. Are there gaps not covered by any pending task? → add tasks
+5. Does `{{TASK}}` describe work not already covered by existing tasks? → add tasks for it
+
+Do ALL of these that apply — you are not limited to one. The point is to look at the actual project state and do what needs doing, whether that's adding brand-new features from `{{TASK}}`, fixing broken tests, unblocking workers, or all of the above.
 
 ### 1. Analyze the Task
 
@@ -49,9 +59,9 @@ Think through:
 - What order must things be built in?
 - What can be built in parallel?
 
-### 1A. Augment Mode (existing project)
+### 1A. Existing Project Mode
 
-If this is an augment (SPEC.md already exists, tasks already exist):
+If this is an existing project (SPEC.md already exists, tasks already exist):
 
 1. Read `SPEC.md` fully — understand the current architecture, interfaces, and success criteria
 2. Read existing task files — scan `tasks/done/`, `tasks/pending/`, `tasks/active/`
@@ -68,7 +78,7 @@ If this is an augment (SPEC.md already exists, tasks already exist):
    - Remove tasks that are now unnecessary
 7. **Update SPEC.md** — add new interfaces, update success criteria, adjust architecture if needed. Do not remove existing content unless replacing it.
 8. **Update CLAUDE.md** — add new modules, update build commands if changed. Keep under 200 lines.
-9. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Create tasks for: test failures found in step 4, integration gaps, new guidance in {{TASK}}, and any other missing work. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
+9. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Create tasks for anything the project needs: test failures found in step 4, integration gaps, work described in {{TASK}} not yet covered by existing tasks, and any other missing work. If nothing needs adding, skip this step. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
 10. **Update PROGRESS.md** — add new tasks to the list
 11. Commit and push, then signal `ORCHESTRATION COMPLETE`
 
