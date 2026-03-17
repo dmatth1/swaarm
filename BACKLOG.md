@@ -77,6 +77,11 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [ ] Consider JSON lines format for worker/reviewer events
 - [ ] Add timestamps and severity levels
 
+### Parallelize Docker-dependent tests
+`test_cleanup.sh` and `test_dead_worker.sh` run sequentially because they share Docker container namespaces. Give each test a fully unique container name prefix (e.g. `swarm-test-${SUITE}-${PID}-${RANDOM}`) so they can run in parallel with the rest.
+- [ ] Unique container name prefixes per test
+- [ ] Remove sequential exception from `run_tests.sh`
+
 ## Done
 
 ### Stream worker logs to a centralized source
