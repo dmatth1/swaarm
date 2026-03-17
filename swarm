@@ -38,34 +38,37 @@ usage() {
 swarm — Multi-agent AI task execution framework
 
 Usage:
-  swarm <task> [OPTIONS]
+  swarm "<prompt>" [OPTIONS]
 
 Arguments:
-  task              Natural language description of what to build or do
+  prompt            What to build, or additional guidance for an existing run
 
 Options:
   -n, --agents N        Number of parallel worker agents (default: 3)
-  -o, --output DIR      Output directory (default: ./swarm-TIMESTAMP)
+  -o, --output DIR      Output directory (new run if absent, resume if exists)
   -v, --verbose         Show agent output in real-time
-  --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --model MODEL         Claude model to use (e.g. opus, sonnet, opus[1m])
   --repo URL            Push to a remote GitHub repo (e.g. https://github.com/user/repo)
+  --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   -h, --help            Show this help
 
 Subcommands:
   swarm status <output-dir>           Show live status of a running swarm
   swarm kill <output-dir> [agent-id]  Kill all agents or a specific one
-                                       agent-id: worker-1, worker-2, ..., orchestrator
-  swarm resume <output-dir> [-n N] [--model M]
-                                      Resume after interruption (rate limit, crash, kill)
+  swarm logs <output-dir> [agent]     Tail agent logs in real-time
   swarm cleanup [output-dir]          Remove orphaned containers (all runs, or specific run)
 
 Examples:
+  # New run (creates swarm-TIMESTAMP/)
   swarm "Build a REST API for a todo app with SQLite"
-  swarm "Create a Python CLI that converts CSV to JSON" --agents 2
-  swarm "Write a complete test suite for this codebase" --output ./tests
-  swarm "Build a static site generator in Go"
+  swarm "Create a Python CLI" --agents 2 --model opus
+
+  # Resume existing run with new guidance
+  swarm "Also add rate limiting" -o ./swarm-20240115-143022
+
+  # Resume with different agent count
+  swarm "Fix the failing tests" -o ./swarm-20240115-143022 -n 5
 
 Output:
   swarm-TIMESTAMP/
@@ -847,11 +850,6 @@ run_with_review() {
     local max_stuck_cycles=3
     local last_specialist_sweep=0
     local specialist_interval="${SPECIALIST_INTERVAL:-5}"
-    local specialist_early="${SPECIALIST_EARLY_SWEEP:-3}"
-    # If specialists already ran pre-flight, skip the early mid-work sweep so they
-    # don't fire again immediately; next sweep follows the normal interval instead.
-    local specialist_first_swept=false
-    [[ "${_g_specialist_count:-0}" -gt 0 ]] && specialist_first_swept=true
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -933,19 +931,12 @@ run_with_review() {
             done
         fi
 
-        # Run specialist sweep: early threshold for first sweep, then fixed interval
+        # Run specialist sweep every N task completions
         if [[ "$all_complete" == "false" ]]; then
-            local current_done should_sweep=false
+            local current_done
             current_done=$(done_count)
-            if [[ "$specialist_first_swept" == "false" && "$current_done" -ge "$specialist_early" ]]; then
-                should_sweep=true
-                specialist_first_swept=true
+            if [[ "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
                 last_specialist_sweep="$current_done"
-            elif [[ "$specialist_first_swept" == "true" && "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
-                should_sweep=true
-                last_specialist_sweep="$current_done"
-            fi
-            if [[ "$should_sweep" == "true" ]]; then
                 run_specialist_sweep "after ${current_done} tasks"
             fi
         fi
@@ -1141,29 +1132,55 @@ monitor_progress() {
 # ─────────────────────────────────────────────────────────────
 
 main() {
-    echo
-    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}${BOLD}║       🐝  SWARM FRAMEWORK  🐝            ║${NC}"
-    echo -e "${CYAN}${BOLD}║     Multi-Agent Task Execution           ║${NC}"
-    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
-    echo
-    info "Task:   $TASK"
-    info "Agents: $NUM_AGENTS"
-    [[ -n "$MODEL" ]] && info "Model:  $MODEL"
-    [[ -n "$REMOTE_REPO" ]] && info "Repo:   $REMOTE_REPO"
-    info "Output: $OUTPUT_DIR"
-    echo
-
     # Check prerequisites
     if ! command -v git &>/dev/null; then
         error "git not found. Please install git."
         exit 1
     fi
-
     if ! command -v docker &>/dev/null; then
         error "Docker not found. Install Docker."
         exit 1
     fi
+
+    # Determine mode: new run vs resume
+    local is_resume=false
+    if [[ -d "$OUTPUT_DIR/main/tasks" ]]; then
+        is_resume=true
+        # Load state from existing run
+        local state_file="$OUTPUT_DIR/swarm.state"
+        if [[ -f "$state_file" ]]; then
+            # shellcheck source=/dev/null
+            source "$state_file"
+            # CLI flags override saved state; saved state fills gaps
+            [[ -z "$MODEL" && -n "${SWARM_MODEL:-}" ]] && MODEL="$SWARM_MODEL"
+            [[ -z "$REMOTE_REPO" && -n "${SWARM_REPO:-}" ]] && REMOTE_REPO="$SWARM_REPO"
+        fi
+    fi
+
+    RUN_ID="$(basename "$OUTPUT_DIR")"
+    REPO_DIR="$OUTPUT_DIR/repo.git"
+    LOGS_DIR="$OUTPUT_DIR/logs"
+    MAIN_DIR="$OUTPUT_DIR/main"
+
+    # Ensure github remote is configured if --repo was provided
+    if [[ -n "$REMOTE_REPO" && -d "$REPO_DIR" ]]; then
+        (cd "$REPO_DIR" && git remote get-url github 2>/dev/null) || \
+            (cd "$REPO_DIR" && git remote add github "$REMOTE_REPO") || true
+    fi
+
+    # Banner
+    echo
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║       🐝  SWARM FRAMEWORK  🐝            ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════╝${NC}"
+    echo
+    info "Prompt: $TASK"
+    info "Agents: $NUM_AGENTS"
+    [[ -n "$MODEL" ]] && info "Model:  $MODEL"
+    [[ -n "$REMOTE_REPO" ]] && info "Repo:   $REMOTE_REPO"
+    info "Output: $OUTPUT_DIR"
+    [[ "$is_resume" == "true" ]] && info "Mode:   resume"
+    echo
 
     # Warn about running containers from prior swarm runs
     local prior_count
@@ -1172,43 +1189,112 @@ main() {
         warn "$prior_count swarm container(s) from a prior run are still running — run './swarm cleanup' to stop them"
     fi
 
-    RUN_ID="$(basename "$OUTPUT_DIR")"
-
-    # Step 1: Initialize workspace
-    init_workspace
-    echo
-
-    # Write state file so 'swarm resume' can restart this run
-    {
-        printf 'SWARM_TASK=%q\n' "$TASK"
-        printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
-        printf 'SWARM_MODEL=%q\n' "$MODEL"
-        printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
-        printf 'SWARM_STARTED="%s"\n' "$(date)"
-    } > "$OUTPUT_DIR/swarm.state"
-
-    # Build Docker image if needed
+    # Build Docker image
     ensure_docker_image
     trap cleanup_docker EXIT
     echo
 
-    # Step 2: Run orchestrator
-    if ! docker_run_orchestrator; then
-        error "Orchestration failed."
-        exit 1
+    if [[ "$is_resume" == "true" ]]; then
+        # ── RESUME: unstick tasks, inject new guidance, run workers ──
+
+        # Pull latest state
+        (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+        # Return any stuck tasks back to pending
+        local unstick_dir
+        unstick_dir=$(mktemp -d)
+        git clone "$REPO_DIR" "$unstick_dir" -q 2>/dev/null
+        (
+            cd "$unstick_dir"
+            git config user.email "swarm@local"
+            git config user.name "Swarm Resume"
+            local any_moved=false
+            for sf in tasks/active/worker-*.md; do
+                if [[ -f "$sf" ]]; then
+                    local tname
+                    tname=$(basename "$sf" | sed 's/worker-[^-]*--//')
+                    log "  Returning stuck task: $tname"
+                    mv "$sf" "tasks/pending/$tname"
+                    any_moved=true
+                fi
+            done
+            if [[ "$any_moved" == "true" ]]; then
+                git add -A
+                git commit -m "resume: return stuck tasks to pending" -q
+                git push origin main -q
+            fi
+        )
+        rm -rf "$unstick_dir"
+
+        # Sync main view
+        (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+
+        # Inject new tasks if the prompt differs from the original task
+        local original_task="${SWARM_TASK:-}"
+        if [[ "$TASK" != "$original_task" ]]; then
+            log "Injecting new guidance..."
+            local max_num=0 f num
+            for f in "$MAIN_DIR/tasks/pending/"*.md \
+                      "$MAIN_DIR/tasks/active/"*.md \
+                      "$MAIN_DIR/tasks/done/"*.md; do
+                [[ -f "$f" ]] || continue
+                num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+                num=$((10#$num))
+                [[ "$num" -gt "$max_num" ]] && max_num="$num"
+            done
+            local next_num=$(( max_num + 1 ))
+            log "New tasks start at $(printf '%03d' "$next_num")"
+            docker_run_inject "$TASK" "$next_num"
+            (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true
+        fi
+
+        local pending done_n
+        pending=$(pending_count)
+        done_n=$(done_count)
+
+        if [[ "$pending" -eq 0 ]]; then
+            success "Nothing to do — all tasks already complete ($done_n done)"
+            echo
+            return 0
+        fi
+
+        success "$pending task(s) pending, $done_n done — spawning $NUM_AGENTS worker(s)"
+        echo
+    else
+        # ── NEW RUN: init workspace, orchestrate, pre-flight sweep ──
+
+        init_workspace
+        echo
+
+        # Write state file
+        {
+            printf 'SWARM_TASK=%q\n' "$TASK"
+            printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
+            printf 'SWARM_MODEL=%q\n' "$MODEL"
+            printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
+            printf 'SWARM_STARTED="%s"\n' "$(date)"
+        } > "$OUTPUT_DIR/swarm.state"
+
+        # Run orchestrator
+        if ! docker_run_orchestrator; then
+            error "Orchestration failed."
+            exit 1
+        fi
+        echo
+
+        # Pre-flight specialist sweep
+        _g_specialist_count=0
+        run_specialist_sweep "pre-flight"
+        sync_main
+        echo
+
+        log "Spawning $NUM_AGENTS worker agents..."
+        echo
     fi
-    echo
 
-    # Step 3: Pre-flight specialist sweep — review task breakdown before workers start
-    _g_specialist_count=0
-    run_specialist_sweep "pre-flight"
-    sync_main
-    echo
+    # ── Common: run workers with review loop ──
 
-    # Step 4: Spawn workers in parallel
-    log "Spawning $NUM_AGENTS worker agents..."
-    echo
-
+    _g_specialist_count="${_g_specialist_count:-0}"
     run_with_review "$NUM_AGENTS"
 
     # Final sync
@@ -1231,10 +1317,6 @@ main() {
     echo
     info "Project files: $MAIN_DIR/"
     info "Agent logs:    $LOGS_DIR/"
-    echo
-    info "View your project:"
-    echo "    ls $MAIN_DIR"
-    echo "    cat $MAIN_DIR/PROGRESS.md"
     echo
 
     if [[ "$total_done" -eq 0 ]]; then
@@ -1271,29 +1353,6 @@ case "${1:-}" in
         cmd_kill "${1:-}" "${2:-}"
         exit 0
         ;;
-    resume)
-        shift
-        output_dir="${1:-}"
-        override_agents=""
-        override_model=""
-        override_repo=""
-        shift 2>/dev/null || true
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                -n|--agents) override_agents="$2"; shift 2 ;;
-                --model) override_model="$2"; shift 2 ;;
-                --repo) override_repo="$2"; shift 2 ;;
-                *) shift ;;
-            esac
-        done
-        cmd_resume "$output_dir" "$override_agents" "$override_model" "$override_repo"
-        exit 0
-        ;;
-    inject)
-        shift
-        cmd_inject "${1:-}" "${2:-}"
-        exit 0
-        ;;
     cleanup)
         shift
         cmd_cleanup "${1:-}"
@@ -1316,15 +1375,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -z "$TASK" ]] && { error "No task specified."; echo; usage; exit 1; }
+[[ -z "$TASK" ]] && { error "No prompt specified."; echo; usage; exit 1; }
 [[ -z "$OUTPUT_DIR" ]] && OUTPUT_DIR="./swarm-$(date +%Y%m%d-%H%M%S)"
 
 # Resolve to absolute path
 OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_DIR")" 2>/dev/null && pwd)/$(basename "$OUTPUT_DIR")" || OUTPUT_DIR="$(pwd)/$(basename "$OUTPUT_DIR")"
-
-REPO_DIR="$OUTPUT_DIR/repo.git"
-LOGS_DIR="$OUTPUT_DIR/logs"
-MAIN_DIR="$OUTPUT_DIR/main"
 
 fi # end BASH_SOURCE guard for argument parsing
 

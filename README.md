@@ -68,11 +68,11 @@ swarm closely matches Anthropic's original multi-agent architecture:
 ## Usage
 
 ```bash
-./swarm "<task>" [OPTIONS]
+./swarm "<prompt>" [OPTIONS]
 
 Options:
   -n, --agents N    Number of parallel workers (default: 3)
-  -o, --output DIR  Output directory (default: ./swarm-TIMESTAMP)
+  -o, --output DIR  Output directory (new run if absent, resume if exists)
   -v, --verbose     Show agent output in terminal (logs always stream to files)
   --model MODEL     Claude model to use (e.g. opus, sonnet, opus[1m])
   --repo URL        Push to a remote GitHub repo (keeps local coordination fast)
@@ -80,46 +80,28 @@ Options:
 ```
 
 ```bash
-# Check status of a running swarm
-./swarm status <output-dir>
+# Resume with new guidance — just point -o at an existing run
+./swarm "Also add rate limiting" -o ./swarm-20240115-143022
+./swarm "Fix the tests" -o ./swarm-20240115-143022 -n 5
 
-# Kill all agents
-./swarm kill <output-dir>
-
-# Kill a specific agent
-./swarm kill <output-dir> worker-1
-./swarm kill <output-dir> orchestrator
-
-# Resume after interruption (rate limit, crash, kill)
-./swarm resume <output-dir>
-./swarm resume <output-dir> -n 2           # resume with fewer/more workers
-./swarm resume <output-dir> --model opus   # resume with a different model
-
-# Add tasks to a running or paused swarm
-./swarm inject <output-dir> "<new guidance>"
-
-# Tail agent logs in real-time
-./swarm logs <output-dir>              # all logs
-./swarm logs <output-dir> worker-1     # specific agent
+# Utility subcommands
+./swarm status <output-dir>              # live status
+./swarm kill <output-dir> [worker-N]     # stop agents
+./swarm logs <output-dir> [worker-N]     # tail logs
+./swarm cleanup [output-dir]             # remove orphaned containers
 ```
 
 ## Examples
 
 ```bash
+# New projects
 ./swarm "Build a Python CLI that converts CSV to JSON"
+./swarm "Build a FastAPI blog server with CRUD" --agents 4
+./swarm "Build a real-time chat server" --model opus --repo https://github.com/user/chat
 
-./swarm "Build a FastAPI server with CRUD endpoints for a blog (posts, comments, users)" --agents 4
-
-./swarm "Create a Go CLI that watches a directory and auto-compresses new image files"
-
-./swarm "Write a comprehensive pytest test suite for the codebase in /path/to/project" \
-  --output ./test-results
-
-./swarm "Build a static site generator that converts Markdown to HTML with Jinja2 templates"
-
-./swarm "Build a real-time chat server" --model opus --agents 4
-
-./swarm "Build a REST API" --repo https://github.com/user/my-api
+# Resume / add guidance to existing run
+./swarm "Also add WebSocket support" -o ./swarm-20240115-143022
+./swarm "Fix the failing integration tests" -o ./swarm-20240115-143022 -n 5
 ```
 
 ## Output structure
@@ -163,46 +145,27 @@ watch -n 5 'ls swarm-*/main/tasks/done/'
 ./swarm status ./swarm-20240115-143022
 ```
 
-## Resuming after interruption
+## Resuming and adding guidance
 
-**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude — both API-level 429 errors and account-level usage caps ("You've hit your limit") — and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter) while keeping their task claimed. When the limit resets, they resume automatically — no intervention needed. Their task stays in `tasks/active/` throughout.
-
-If you want to restart immediately after a rate limit clears rather than waiting for the backoff, use `resume`.
-
-If a run stops mid-way for other reasons (crash, `Ctrl-C`, killed worker), use `resume` to pick up where it left off:
+Point `-o` at an existing swarm output directory to resume. You can provide new guidance in the prompt — the inject agent will create additional tasks:
 
 ```bash
-./swarm resume ./swarm-20240115-143022
+# Resume after crash/rate-limit
+./swarm "Continue" -o ./swarm-20240115-143022
+
+# Add new features to an existing run
+./swarm "Also add rate limiting and an admin dashboard" -o ./swarm-20240115-143022
+
+# Resume with more workers
+./swarm "Fix the failing tests" -o ./swarm-20240115-143022 -n 5
 ```
 
 Resume automatically:
 1. Moves any stuck `tasks/active/worker-N--*.md` files back to `tasks/pending/`
-2. Commits and pushes the unstick to the shared repo
-3. Spawns fresh workers to finish the remaining tasks
+2. If the prompt differs from the original task, injects new tasks via the inject agent
+3. Spawns fresh workers to finish remaining + new tasks
 
-You can change the worker count when resuming:
-
-```bash
-./swarm resume ./swarm-20240115-143022 -n 5
-```
-
-If resume says "Nothing to resume — all tasks already complete", you're done.
-
-If tasks keep getting stuck on resume, check the logs to understand why:
-
-```bash
-tail -50 ./swarm-20240115-143022/logs/worker-1.log
-```
-
-## Injecting new tasks
-
-While a swarm is paused (or after it finishes), you can add new tasks based on additional guidance:
-
-```bash
-./swarm inject ./swarm-20240115-143022 "Also add rate limiting and an admin dashboard"
-```
-
-The inject agent reads the existing SPEC.md and task history, then creates new numbered task files in `tasks/pending/` that pick up where the existing numbering left off. Run `./swarm resume <dir>` afterward to start workers on the new tasks.
+**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude — both API-level 429 errors and account-level usage caps ("You've hit your limit") — and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter). No intervention needed.
 
 ## Pushing to GitHub
 
@@ -210,14 +173,9 @@ Use `--repo` to mirror all progress to a remote GitHub repository:
 
 ```bash
 ./swarm "Build a REST API" --repo https://github.com/user/my-api
-
-# Or add a remote to an existing run
-./swarm resume ./swarm-20240115-143022 --repo https://github.com/user/my-api
 ```
 
-Workers still coordinate through the local bare repo (fast, no network latency on task claims). The harness pushes to GitHub after each status sync, so the remote stays up to date.
-
-When `--repo` is set, all agents receive a security notice prohibiting commits of API keys, passwords, PII, or other secrets — since the repo may be public.
+Workers coordinate through the local bare repo (fast). The harness pushes to GitHub after each status sync. When `--repo` is set, all agents receive a security notice prohibiting commits of API keys, passwords, PII, or other secrets.
 
 ## Killing agents
 

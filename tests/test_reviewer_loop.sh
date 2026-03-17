@@ -20,8 +20,7 @@ setup_review_mocks() {
     # (which already pulls). Mocking prevents git pull from reverting any
     # in-test filesystem mutations made by docker_run_reviewer mocks.
     sync_main()                      { :; }
-    # Prevent specialist sweeps from firing on low done counts
-    SPECIALIST_EARLY_SWEEP=999
+    # Prevent specialist sweeps from firing during tests
     SPECIALIST_INTERVAL=999
     # Small limit so infinite-loop bugs surface quickly (max_reviews = 5 * agents)
     MAX_WORKER_ITERATIONS=5

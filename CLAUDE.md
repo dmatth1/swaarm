@@ -92,15 +92,16 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 ## Subcommands
 
 ```bash
-./swarm "<task>" [--agents N] [--output DIR] [--model M] [--repo URL] [--verbose]
+./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--verbose]
+# If -o points to existing run → resume (unstick tasks, inject new guidance, re-spawn workers)
+# If -o absent or new dir → new run (orchestrate + workers)
 ./swarm status <output-dir>
 ./swarm kill <output-dir> [agent-id]
-./swarm resume <output-dir> [-n N] [--model M] [--repo URL]  # unsticks + re-spawn
-./swarm inject <output-dir> "<guidance>"  # add tasks to existing run
 ./swarm logs <output-dir> [worker-N]     # tail agent logs in real-time
+./swarm cleanup [output-dir]             # remove orphaned containers
 ```
 
-`swarm.state` (written at init) stores `SWARM_TASK` and `SWARM_AGENTS` for resume.
+`swarm.state` (written at init) stores `SWARM_TASK`, `SWARM_AGENTS`, `SWARM_MODEL`, `SWARM_REPO` for resume.
 
 ## Common Failure Modes
 
