@@ -42,6 +42,7 @@ Usage:
 
 Arguments:
   prompt            What to build, or additional guidance for an existing run
+                    (optional when resuming with -o)
 
 Options:
   -n, --agents N        Number of parallel worker agents (default: 3)
@@ -64,7 +65,10 @@ Examples:
   swarm "Build a REST API for a todo app with SQLite"
   swarm "Create a Python CLI" --agents 2 --model opus
 
-  # Resume existing run with new guidance
+  # Resume existing run (no new guidance)
+  swarm -o ./swarm-20240115-143022
+
+  # Resume with new guidance
   swarm "Also add rate limiting" -o ./swarm-20240115-143022
 
   # Resume with different agent count
@@ -1288,7 +1292,7 @@ main() {
 
         # Inject new tasks if the prompt differs from the original task
         local original_task="${SWARM_TASK:-}"
-        if [[ "$TASK" != "$original_task" ]]; then
+        if [[ -n "$TASK" && "$TASK" != "$original_task" ]]; then
             log "Injecting new guidance..."
             local max_num=0 f num
             for f in "$MAIN_DIR/tasks/pending/"*.md \
@@ -1432,7 +1436,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -z "$TASK" ]] && { error "No prompt specified."; echo; usage; exit 1; }
+# Prompt is required for new runs; optional for resume (just point -o at existing dir)
+if [[ -z "$TASK" ]]; then
+    if [[ -n "$OUTPUT_DIR" && -d "$OUTPUT_DIR/main/tasks" ]]; then
+        TASK=""  # Resume with no new guidance
+    else
+        error "No prompt specified."; echo; usage; exit 1
+    fi
+fi
 [[ -z "$OUTPUT_DIR" ]] && OUTPUT_DIR="./swarm-$(date +%Y%m%d-%H%M%S)"
 
 # Resolve to absolute path
