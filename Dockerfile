@@ -10,13 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     golang-go \
     build-essential \
     curl \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
 # Non-root user required: --dangerously-skip-permissions is blocked for root
-RUN useradd -m -s /bin/bash swarm && mkdir /workspace && chown swarm:swarm /workspace
+RUN useradd -m -s /bin/bash swarm && mkdir /workspace && chown swarm:swarm /workspace \
+    && echo "swarm ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/swarm
 
 # Entrypoint and stream parser
 COPY docker/entrypoint.sh /entrypoint.sh
