@@ -2,6 +2,13 @@
 
 ## P2 — Should fix
 
+### `--no-sweep` flag to skip specialist sweeps
+Specialist sweeps (pre-flight, post-augment, periodic) can be slow. Add a flag to skip them.
+- [ ] Add `--no-sweep` CLI flag (default: false — sweeps run as normal)
+- [ ] Store in `swarm.state` as `SWARM_NO_SWEEP` for resume
+- [ ] Skip `run_specialist_sweep` calls when set
+- [ ] Update `--help` and CLAUDE.md
+
 ### Auto-fallback on 529 overload
 Workers backoff and retry the same model indefinitely on 529. Should detect sustained overload and switch to a fallback model (e.g. opus → sonnet).
 - [ ] Detect 529 separately from rate-limit (429)
