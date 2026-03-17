@@ -58,7 +58,7 @@ You: ./swarm "Build a todo REST API" --agents 3
   Your project, complete in main/
 ```
 
-Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 10 completions, a full review + specialist sweep runs concurrently (code quality, reliability, test coverage, performance, documentation, project management).
+Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 6 completions (configurable via `RESTRUCTURE_INTERVAL`), the orchestrator runs in augment mode alongside a specialist sweep (code quality, reliability, test coverage, performance, documentation, project management).
 
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 
@@ -87,6 +87,7 @@ Options:
   -v, --verbose     Show agent output in terminal (logs always stream to files)
   --model MODEL     Claude model to use (e.g. opus, sonnet, opus[1m])
   --repo URL        Push to a remote GitHub repo (keeps local coordination fast)
+  --mount H:C       Mount HOST path to CONTAINER path (repeatable)
   -h, --help        Show help
 ```
 
