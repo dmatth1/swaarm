@@ -921,4 +921,213 @@ done
 teardown_e2e
 trap - EXIT
 
+# ─── Test 11: TESTS_FAIL triggers orchestrator immediately ────────────────────
+
+setup_test "e2e: TESTS_FAIL from reviewer triggers orchestrator to add fix tasks"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# One pending task for workers to complete
+push_file_to_repo "tasks/pending/001-setup.md" \
+    "# Task 001: Setup
+## Dependencies
+None" "add task"
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+RESTRUCTURE_INTERVAL=999
+MAX_WORKER_ITERATIONS=10
+
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-tf-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="5" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+# Reviewer fails on first per-task review, passes on final drain
+REVIEWER_CALL_NUM=0
+docker_run_reviewer() {
+    REVIEWER_CALL_NUM=$((REVIEWER_CALL_NUM + 1))
+    mkdir -p "$LOGS_DIR"
+    if [[ "$1" == "--final--" ]]; then
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    elif [[ "$REVIEWER_CALL_NUM" -eq 1 ]]; then
+        echo "TESTS_FAIL" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+# Track orchestrator calls triggered by TESTS_FAIL
+ORCHESTRATOR_CALLS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("${1:-noarg}")
+    mkdir -p "$LOGS_DIR"
+}
+
+run_specialist_sweep() { :; }
+
+run_with_review 1
+
+# Verify orchestrator was called (triggered by TESTS_FAIL)
+[[ "${#ORCHESTRATOR_CALLS[@]}" -ge 1 ]] \
+    && pass "orchestrator called after TESTS_FAIL (${#ORCHESTRATOR_CALLS[@]} call(s))" \
+    || fail "orchestrator not called after TESTS_FAIL"
+
+# Verify reviewer was called multiple times (initial fail + eventual pass)
+[[ "$REVIEWER_CALL_NUM" -ge 2 ]] \
+    && pass "reviewer called multiple times ($REVIEWER_CALL_NUM — fail then pass)" \
+    || fail "expected multiple reviewer calls, got $REVIEWER_CALL_NUM"
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 12: Periodic orchestrator fires every N completions ─────────────────
+
+setup_test "e2e: periodic orchestrator fires every N completions (RESTRUCTURE_INTERVAL)"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# 4 pending tasks; interval=2 should trigger orchestrator at 2 completions
+for i in 1 2 3 4; do
+    padded=$(printf '%03d' $i)
+    push_file_to_repo "tasks/pending/${padded}-task.md" \
+        "# Task ${padded}
+## Dependencies
+None" "add $padded"
+done
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+RESTRUCTURE_INTERVAL=2
+MAX_WORKER_ITERATIONS=20
+
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-po-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="10" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+PERIODIC_ORCHESTRATOR_CALLS=0
+docker_run_orchestrator() {
+    PERIODIC_ORCHESTRATOR_CALLS=$((PERIODIC_ORCHESTRATOR_CALLS + 1))
+    mkdir -p "$LOGS_DIR"
+}
+
+SWEEP_LABELS=()
+run_specialist_sweep() { SWEEP_LABELS+=("$1"); }
+
+run_with_review 1
+
+# Periodic orchestrator should have fired (4 tasks / interval 2 = at least 1 trigger)
+[[ "$PERIODIC_ORCHESTRATOR_CALLS" -ge 1 ]] \
+    && pass "periodic orchestrator fired ($PERIODIC_ORCHESTRATOR_CALLS call(s))" \
+    || fail "periodic orchestrator did not fire"
+
+# Periodic specialist sweep should have fired with "at N tasks" label
+found_periodic_sweep=false
+for label in "${SWEEP_LABELS[@]+"${SWEEP_LABELS[@]}"}"; do
+    [[ "$label" == *"at "* ]] && found_periodic_sweep=true && break
+done
+[[ "$found_periodic_sweep" == "true" ]] \
+    && pass "periodic specialist sweep fired alongside orchestrator" \
+    || fail "no periodic specialist sweep (sweeps: ${SWEEP_LABELS[*]:-none})"
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 13: Stuck detection triggers orchestrator ───────────────────────────
+
+setup_test "e2e: stuck state triggers orchestrator to resolve deadlock"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# One done task (workers already finished it), one pending task that stays pending
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+push_file_to_repo "tasks/pending/002-blocked.md" \
+    "# Task 002
+## Dependencies
+None" "add stuck task"
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+RESTRUCTURE_INTERVAL=999
+MAX_WORKER_ITERATIONS=5
+
+# Worker does nothing (simulates all workers dead/idle)
+docker_run_worker() { :; }
+
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+ORCHESTRATOR_STUCK_CALLS=0
+docker_run_orchestrator() {
+    ORCHESTRATOR_STUCK_CALLS=$((ORCHESTRATOR_STUCK_CALLS + 1))
+    # Resolve the stuck state by moving task to done so loop can exit
+    mkdir -p "$MAIN_DIR/tasks/done"
+    mv "$MAIN_DIR/tasks/pending/002-blocked.md" \
+       "$MAIN_DIR/tasks/done/002-blocked.md" 2>/dev/null || true
+}
+
+run_specialist_sweep() { :; }
+
+run_with_review 1
+
+[[ "$ORCHESTRATOR_STUCK_CALLS" -ge 1 ]] \
+    && pass "orchestrator triggered after stuck state detected ($ORCHESTRATOR_STUCK_CALLS call(s))" \
+    || fail "orchestrator not called for stuck state"
+
+# Project should have completed (stuck resolved, final drain passed)
+local_done=$(count_md "$MAIN_DIR/tasks/done")
+[[ "$local_done" -ge 2 ]] \
+    && pass "project completed after stuck resolution ($local_done done)" \
+    || fail "project did not complete after stuck resolution ($local_done done)"
+
+teardown_e2e
+trap - EXIT
+
 print_summary
