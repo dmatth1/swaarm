@@ -5,7 +5,9 @@ Parse claude --output-format=stream-json --include-partial-messages output.
 - stream_event/content_block_delta text_delta → log file (real-time, token by token)
 - result event text → output file (for signal/rate-limit grep)
 - rate_limit_event with non-allowed status → output file (triggers worker backoff)
-- Non-JSON lines → both files (handles mock claude in tests, stderr errors)
+- Non-JSON lines → log file always; output file only if not a partial JSON fragment
+  (lines starting with '{' that fail to parse are likely truncated JSON from a crash
+  and could contain false signal words like ALL_DONE inside a field value)
 
 Usage: stream_parse.py <output_file> <log_file>
 """
@@ -21,7 +23,14 @@ def main():
     output_path = sys.argv[1]
     log_path = sys.argv[2]
 
-    with open(output_path, "w") as out, open(log_path, "a") as log:
+    try:
+        out = open(output_path, "w")
+        log = open(log_path, "a")
+    except OSError as e:
+        print(f"stream_parse: failed to open files: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
         for raw_line in sys.stdin:
             line = raw_line.rstrip("\n")
             if not line:
@@ -30,12 +39,16 @@ def main():
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
-                # Non-JSON line (mock claude output, stderr error message, etc.)
-                # Write to both so signal grep works on plain-text mock output.
+                # Non-JSON line: always write to log.
                 log.write(line + "\n")
                 log.flush()
-                out.write(line + "\n")
-                out.flush()
+                # Only write to output file if it's genuine text (mock claude,
+                # error messages), NOT a partial JSON fragment from a crash.
+                # Partial fragments start with '{' — they may contain signal
+                # words like ALL_DONE inside field values, causing false positives.
+                if not line.startswith("{"):
+                    out.write(line + "\n")
+                    out.flush()
                 continue
 
             t = event.get("type", "")
@@ -65,6 +78,12 @@ def main():
                     msg = f"rate limit hit (resets {resets_at} UTC)\n"
                     out.write(msg)
                     out.flush()
+    except OSError as e:
+        print(f"stream_parse: I/O error during processing: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        out.close()
+        log.close()
 
 
 if __name__ == "__main__":

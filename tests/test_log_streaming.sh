@@ -303,4 +303,53 @@ new_size=$(wc -c < "$log_file" | tr -d ' ')
 teardown_test
 trap - EXIT
 
+# ─── Test: stream_parse filters partial JSON fragments from output file ──────
+
+setup_test "streaming: partial JSON fragments not written to output file"
+trap teardown_test EXIT
+
+init_streaming_workspace
+
+local_output="$TEST_LOGS/output.txt"
+local_log="$TEST_LOGS/parse-test.log"
+
+# Feed a mix of valid JSON, partial JSON fragments, and plain text through stream_parse
+printf '%s\n' \
+    '{"type":"result","result":"TASK_DONE"}' \
+    '{"text":"ALL_DONE incomplete fragment' \
+    '<promise>ALL_DONE</promise>' \
+    '{"partial":true, "signal":"NO_TASKS' \
+    'Error: 429 rate limit exceeded' \
+    | python3 "$TESTS_DIR/../docker/stream_parse.py" "$local_output" "$local_log"
+
+# Output file should have: TASK_DONE (from result event), ALL_DONE (plain text), rate limit error
+# Output file should NOT have: partial JSON fragments starting with '{'
+grep -q "TASK_DONE" "$local_output" \
+    && pass "output file has TASK_DONE from valid result event" \
+    || fail "output file missing TASK_DONE"
+
+grep -q "ALL_DONE" "$local_output" \
+    && pass "output file has ALL_DONE from plain text (mock claude compatible)" \
+    || fail "output file missing ALL_DONE plain text"
+
+grep -q "429 rate limit" "$local_output" \
+    && pass "output file has rate limit error text" \
+    || fail "output file missing rate limit error"
+
+grep -q "incomplete fragment" "$local_output" \
+    && fail "output file contains partial JSON fragment (false positive risk)" \
+    || pass "partial JSON fragment correctly filtered from output file"
+
+grep -q "NO_TASKS" "$local_output" \
+    && fail "output file contains partial JSON with NO_TASKS signal (false positive)" \
+    || pass "partial JSON with NO_TASKS signal correctly filtered"
+
+# Log file should have everything (including fragments — useful for debugging)
+grep -q "incomplete fragment" "$local_log" \
+    && pass "log file has partial JSON fragment (for debugging)" \
+    || fail "log file missing partial JSON fragment"
+
+teardown_test
+trap - EXIT
+
 print_summary

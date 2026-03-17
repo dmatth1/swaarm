@@ -56,7 +56,9 @@ run_claude() {
     claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p \
         --output-format stream-json --verbose --include-partial-messages \
         < "$_rc_prompt_file" 2>&1 | \
-    python3 "$(dirname "$0")/stream_parse.py" "$CLAUDE_OUTPUT_FILE" "$_rc_log" || true
+    python3 "$(dirname "$0")/stream_parse.py" "$CLAUDE_OUTPUT_FILE" "$_rc_log" || {
+        echo "[stream_parse error] pipeline failed (exit $?)" >> "$_rc_log"
+    }
 
     rm -f "$_rc_prompt_file"
 
