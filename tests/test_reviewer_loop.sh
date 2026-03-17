@@ -382,4 +382,138 @@ fi
 teardown_test
 trap - EXIT
 
+# ─── Test: Stuck detection fires when done_count = 0 ──────────────────────────
+
+setup_test "reviewer loop: stuck detection fires with pending > 0, active = 0, done = 0"
+trap teardown_test EXIT
+
+init_test_workspace
+# Only pending tasks, nothing done yet — simulates workers crashing before completing any task
+push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "pending"
+
+load_swarm
+setup_review_mocks
+
+ORCHESTRATOR_CALLS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("stuck")
+    # Resolve by moving the pending task to done
+    mkdir -p "$MAIN_DIR/tasks/done"
+    mv "$MAIN_DIR/tasks/pending/001-setup.md" "$MAIN_DIR/tasks/done/001-setup.md" 2>/dev/null || true
+}
+
+REVIEWER_CALLS=()
+docker_run_reviewer() {
+    REVIEWER_CALLS+=("$1")
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+run_with_review 1
+
+found_stuck=false
+for call in "${ORCHESTRATOR_CALLS[@]+"${ORCHESTRATOR_CALLS[@]}"}"; do
+    [[ "$call" == "stuck" ]] && found_stuck=true && break
+done
+[[ "$found_stuck" == "true" ]] \
+    && pass "orchestrator fired with done_count=0 (stuck detection no longer requires done > 0)" \
+    || fail "orchestrator not called — stuck detection still blocked by done_count=0 guard"
+
+teardown_test
+trap - EXIT
+
+# ─── Test: Respawn counter caps at MAX_RESPAWNS ──────────────────────────────
+
+setup_test "reviewer loop: respawn counter prevents infinite respawn loops"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/pending/001-setup.md" "# Task 001" "pending"
+
+load_swarm
+# Don't use setup_review_mocks — we need real check_and_respawn_dead_workers
+docker_run_reviewer()    { :; }
+monitor_progress()       { :; }
+cleanup_docker()         { :; }
+run_specialist_sweep()   { :; }
+docker_run_orchestrator() {
+    # Resolve stuck state so loop can exit
+    mkdir -p "$MAIN_DIR/tasks/done"
+    mv "$MAIN_DIR/tasks/pending/001-setup.md" "$MAIN_DIR/tasks/done/001-setup.md" 2>/dev/null || true
+}
+sleep()                  { :; }
+sync_main()              { :; }
+
+# Simulate a dead worker by writing a .cid file for a non-existent container
+mkdir -p "$OUTPUT_DIR/pids"
+echo "swarm-test-dead-worker" > "$OUTPUT_DIR/pids/worker-1.cid"
+docker() {
+    if [[ "$1" == "inspect" ]]; then
+        return 1  # container not found
+    elif [[ "$1" == "rm" ]]; then
+        return 0
+    elif [[ "$1" == "run" ]]; then
+        # Simulate worker dying again immediately — recreate the cid file
+        echo "swarm-test-dead-worker" > "$OUTPUT_DIR/pids/worker-1.cid"
+        return 0
+    fi
+}
+docker_run_worker() {
+    # Simulate spawning a worker that immediately dies
+    echo "swarm-test-dead-worker" > "$OUTPUT_DIR/pids/worker-1.cid"
+}
+
+# Set low cap for testing
+MAX_RESPAWNS=3
+
+# Run check_and_respawn_dead_workers repeatedly
+local_respawn_count=0
+for attempt in 1 2 3 4 5; do
+    check_and_respawn_dead_workers 1
+    if [[ -f "$OUTPUT_DIR/pids/worker-1.respawns" ]]; then
+        local_respawn_count=$(cat "$OUTPUT_DIR/pids/worker-1.respawns")
+    fi
+done
+
+[[ "$local_respawn_count" -le 3 ]] \
+    && pass "respawn capped at MAX_RESPAWNS=3 (count=$local_respawn_count)" \
+    || fail "respawn exceeded cap: $local_respawn_count > 3"
+
+teardown_test
+trap - EXIT
+
+# ─── Test: Respawn counter resets on progress ─────────────────────────────────
+
+setup_test "reviewer loop: respawn counter resets when tasks complete"
+trap teardown_test EXIT
+
+init_test_workspace
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+
+load_swarm
+setup_review_mocks
+
+REVIEWER_CALLS=()
+docker_run_reviewer() {
+    REVIEWER_CALLS+=("$1")
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+# Pre-create a respawn counter file (simulating prior crashes)
+mkdir -p "$OUTPUT_DIR/pids"
+echo "2" > "$OUTPUT_DIR/pids/worker-1.respawns"
+
+run_with_review 1
+
+# After a task was reviewed (progress made), respawn counter should be cleared
+if [[ -f "$OUTPUT_DIR/pids/worker-1.respawns" ]]; then
+    fail "respawn counter not cleared after task completion"
+else
+    pass "respawn counter cleared after task completion (progress resets cap)"
+fi
+
+teardown_test
+trap - EXIT
+
 print_summary

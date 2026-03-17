@@ -729,12 +729,22 @@ check_and_respawn_dead_workers() {
         docker rm "$cname" 2>/dev/null || true
         rm -f "$cid_file"
 
-        # Respawn if there is still pending work
+        # Respawn if there is still pending work (cap attempts to prevent infinite loops)
         local p
         p=$(pending_count)
         if [[ "$p" -gt 0 ]]; then
-            log "Respawning worker $i..."
-            docker_run_worker "$i" "true"
+            local respawn_file="$OUTPUT_DIR/pids/worker-${i}.respawns"
+            local respawns=0
+            [[ -f "$respawn_file" ]] && respawns=$(cat "$respawn_file" 2>/dev/null || echo 0)
+            local max_respawns="${MAX_RESPAWNS:-5}"
+            if [[ "$respawns" -ge "$max_respawns" ]]; then
+                warn "Worker $i hit respawn cap ($max_respawns) — not respawning (possible persistent failure)"
+            else
+                respawns=$((respawns + 1))
+                echo "$respawns" > "$respawn_file"
+                log "Respawning worker $i (attempt $respawns/$max_respawns)..."
+                docker_run_worker "$i" "true"
+            fi
         fi
     done
 }
@@ -813,6 +823,11 @@ run_with_review() {
                 docker_run_orchestrator "$next_num"
             fi
         done
+
+        # Reset respawn counters when progress is made (prevents stale caps after recovery)
+        if [[ "$new_reviews_this_cycle" -gt 0 ]]; then
+            rm -f "$OUTPUT_DIR/pids/"worker-*.respawns 2>/dev/null
+        fi
 
         # Scan pending/ for BLOCKED tasks — orchestrator decomposes, hints, or escalates
         if [[ "$all_complete" == "false" ]]; then
@@ -896,9 +911,8 @@ run_with_review() {
                         all_complete=true
                     fi
                 fi
-            elif [[ "$p_count" -gt 0 && "$a_count" -eq 0 && "$(done_count)" -gt 0 ]]; then
+            elif [[ "$p_count" -gt 0 && "$a_count" -eq 0 ]]; then
                 # Pending tasks exist but no worker is active — potential deadlock
-                # (only after ≥1 task done, to avoid false positives during worker startup)
                 stuck_cycles=$((stuck_cycles + 1))
                 if [[ "$stuck_cycles" -ge "$max_stuck_cycles" ]]; then
                     review_count=$((review_count + 1))

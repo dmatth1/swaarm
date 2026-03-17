@@ -228,8 +228,12 @@ run_worker() {
 
     echo "=== Worker $agent_id started $(date) ===" > "$log_file"
 
-    # Clone bare repo
-    git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>/dev/null
+    # Clone bare repo — fail fast if clone fails (prevents infinite respawn loops)
+    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+        echo "FATAL: git clone failed — exiting to prevent respawn loop" >> "$log_file"
+        echo "=== Worker $agent_id CLONE_FAILED at $(date) ===" >> "$log_file"
+        exit 2
+    fi
     cd "${WORKSPACE_DIR:-/workspace}"
     git config user.email "${worker_name}@swarm"
     git config user.name "Swarm Worker $agent_id"

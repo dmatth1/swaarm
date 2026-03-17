@@ -4,17 +4,6 @@ Items ranked by priority for local (Mac) development workflow.
 
 ## P1 — Fix now
 
-### stuck detection skips when done_count = 0
-**Bug** · `swarm:796`
-The stuck-state detector (pending > 0, active = 0) only fires when at least one task is already done. If workers repeatedly crash before completing any task, the project idles forever with no reviewer triggered and no recovery.
-- [ ] Remove or relax the `done_count() -gt 0` guard
-- [ ] Add test to `tests/test_reviewer_loop.sh` covering `pending > 0, active = 0, done = 0`
-
-### Git clone failure causes infinite respawn loop
-If a worker's initial `git clone` fails (repo corruption, disk full), the worker exits, `check_and_respawn_dead_workers()` sees the stuck task and respawns — which also fails. Infinite loop.
-- [ ] Validate git clone success in entrypoint.sh before entering worker loop
-- [ ] Cap respawn attempts per worker
-
 ## P2 — Should fix
 
 ### Silent git failures in critical paths
@@ -73,6 +62,16 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [ ] Remove sequential exception from `run_tests.sh`
 
 ## Done
+
+### Stuck detection with done_count = 0
+- [x] Removed `done_count > 0` guard from stuck-state detector — now fires when `pending > 0, active = 0` regardless of done count
+- [x] Test: `test_reviewer_loop.sh` — "stuck detection fires with pending > 0, active = 0, done = 0"
+
+### Git clone failure / infinite respawn loop
+- [x] Worker entrypoint validates `git clone` success — exits with code 2 on failure, logs `CLONE_FAILED`
+- [x] Respawn attempts capped at `MAX_RESPAWNS` (default 5) per worker via `pids/worker-N.respawns` counter
+- [x] Counter resets when any task completes (progress = system is healthy)
+- [x] Tests: `test_reviewer_loop.sh` — respawn cap + counter reset (3 new tests, total 24)
 
 ### Reviewer artifact compliance
 - [x] Orchestrator augment mode checks acceptance criteria for required artifacts
