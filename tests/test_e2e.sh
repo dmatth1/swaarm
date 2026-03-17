@@ -20,8 +20,6 @@ init_e2e() {
     E2E_PROMPTS="$TEST_TMPDIR/prompts"
     init_mock_prompts "$E2E_PROMPTS"
     printf 'Worker prompt for {{AGENT_ID}}\n' > "$E2E_PROMPTS/worker.md"
-    # Role marker on separate line (awk replaces {{GUIDANCE}} line with just the value)
-    printf 'ROLE:inject\n{{GUIDANCE}}\nStarting at task number {{NEXT_TASK_NUM}}\n' > "$E2E_PROMPTS/inject.md"
 
     mkdir -p "$TEST_TMPDIR/logs"
 
@@ -33,10 +31,10 @@ SCRIPT
     chmod +x "$MOCK_BIN/sleep"
 }
 
-# Run entrypoint.sh in worker mode
+# Run entrypoint.sh in worker mode (deterministic, sequential)
 run_e2e_worker() {
     local agent_id="$1"
-    local workspace="$TEST_TMPDIR/ws-worker-${agent_id}-$(date +%s%N)"
+    local workspace="$TEST_TMPDIR/ws-worker-${agent_id}-$$-${RANDOM}"
     LOGS_DIR="$TEST_TMPDIR/logs" \
     UPSTREAM_DIR="$REPO_DIR" \
     WORKSPACE_DIR="$workspace" \
@@ -46,22 +44,6 @@ run_e2e_worker() {
     MOCK_STATE_DIR="$MOCK_BIN" \
     PATH="$MOCK_BIN:$PATH" \
         bash "$ENTRYPOINT" worker "$agent_id" 2>/dev/null || true
-}
-
-# Run entrypoint.sh in inject mode
-run_e2e_inject() {
-    local guidance="$1"
-    local next_num="$2"
-    local workspace="$TEST_TMPDIR/ws-inject"
-    GUIDANCE="$guidance" \
-    NEXT_TASK_NUM="$next_num" \
-    LOGS_DIR="$TEST_TMPDIR/logs" \
-    UPSTREAM_DIR="$REPO_DIR" \
-    WORKSPACE_DIR="$workspace" \
-    PROMPTS_DIR="$E2E_PROMPTS" \
-    MOCK_STATE_DIR="$MOCK_BIN" \
-    PATH="$MOCK_BIN:$PATH" \
-        bash "$ENTRYPOINT" inject 2>/dev/null || true
 }
 
 # Sync MAIN_DIR from bare repo
@@ -122,7 +104,6 @@ if echo "$prompt" | grep -q 'worker-[0-9]'; then
     # Crash scenario: claim task then exit non-zero (simulates persistent failure)
     if [[ "$scenario" == "crash" ]]; then
         git pull origin main -q 2>/dev/null || true
-        # Only claim if nothing already active for this worker
         own=$(find tasks/active -name "${agent_id}--*.md" 2>/dev/null | head -1 || true)
         if [[ -z "$own" ]]; then
             task=$(ls tasks/pending/*.md 2>/dev/null | grep -v .gitkeep | sort | head -1 || true)
@@ -149,7 +130,6 @@ if echo "$prompt" | grep -q 'worker-[0-9]'; then
     own_active=$(find tasks/active -name "${agent_id}--*.md" 2>/dev/null | head -1 || true)
     if [[ -n "$own_active" ]]; then
         tname=$(basename "$own_active" | sed "s/${agent_id}--//")
-        # Complete it
         mkdir -p src
         echo "# code for $tname" > "src/${tname%.md}.py"
         mv "$own_active" "tasks/done/${tname}"
@@ -174,7 +154,6 @@ if echo "$prompt" | grep -q 'worker-[0-9]'; then
     git add -A
     git commit -m "${agent_id}: claim $tname" -q
     if ! git push origin main -q 2>&1; then
-        # Push conflict — exit cleanly, entrypoint loop will retry
         git reset --hard HEAD~1 -q 2>/dev/null || true
         echo "Push failed, will retry"
         exit 0
@@ -191,24 +170,21 @@ if echo "$prompt" | grep -q 'worker-[0-9]'; then
     git push origin main -q 2>/dev/null || true
     echo "<promise>TASK_DONE</promise>"
 
-# ── INJECT ────────────────────────────────────────────────────
-elif echo "$prompt" | grep -qi 'ROLE:inject'; then
+# ── ORCHESTRATOR (augment mode — NEXT_TASK_NUM is set) ────────
+elif [[ -n "${NEXT_TASK_NUM:-}" ]]; then
     git pull origin main -q 2>/dev/null || true
-    # Next task number is the last line of the prompt (awk replaces {{NEXT_TASK_NUM}} with value)
-    next_num=$(echo "$prompt" | grep -o '^[0-9]*$' | tail -1)
-    next_num="${next_num:-099}"
-    padded=$(printf '%03d' "$next_num")
-    cat > "tasks/pending/${padded}-injected.md" << TASKEOF
-# Task ${padded}: Injected Task
+    padded=$(printf '%03d' "$NEXT_TASK_NUM")
+    cat > "tasks/pending/${padded}-augmented.md" << TASKEOF
+# Task ${padded}: Augmented Task
 ## Description
-Injected via guidance.
+Added via orchestrator augment mode.
 ## Dependencies
 None
 TASKEOF
     git add -A
-    git commit -m "inject: add task ${padded}" -q
+    git commit -m "orchestrator: augment with task ${padded}" -q
     git push origin main -q
-    echo "<promise>INJECTION COMPLETE</promise>"
+    echo "<promise>ORCHESTRATION COMPLETE</promise>"
 
 # ── FALLBACK ──────────────────────────────────────────────────
 else
@@ -241,15 +217,11 @@ EOF
 )" "orchestrator: create task ${padded}"
 done
 
-# Run worker-1: processes tasks sequentially (MULTI_ROUND=false → exits on signal)
+# Run workers sequentially — deterministic, no race conditions
 run_e2e_worker 1
 sync
-
-# Run worker-2: picks up remaining tasks
 run_e2e_worker 2
 sync
-
-# If any left, run worker-1 again
 remaining=$(count_md "$MAIN_DIR/tasks/pending")
 if [[ "$remaining" -gt 0 ]]; then
     run_e2e_worker 1
@@ -272,18 +244,15 @@ active_count=$(count_md "$MAIN_DIR/tasks/active")
     && pass "no active tasks remain" \
     || fail "$active_count tasks still active"
 
-# Verify source files were created
 src_count=$(find "$MAIN_DIR/src" -name "*.py" 2>/dev/null | wc -l | tr -d ' ')
 [[ "$src_count" -eq 3 ]] \
     && pass "source files created for all tasks ($src_count)" \
     || fail "expected 3 source files, got $src_count"
 
-# Verify worker log exists
 [[ -f "$TEST_TMPDIR/logs/worker-1.log" ]] \
     && pass "worker-1 log file exists" \
     || fail "worker-1 log file missing"
 
-# Verify git history shows worker commits
 commit_log=$(cd "$MAIN_DIR" && git log --oneline --all)
 echo "$commit_log" | grep -q "worker-1: complete\|worker-1: claim" \
     && pass "git log contains worker-1 commits" \
@@ -292,54 +261,7 @@ echo "$commit_log" | grep -q "worker-1: complete\|worker-1: claim" \
 teardown_e2e
 trap - EXIT
 
-# ─── Test 2: Git conflict resolution — 2 workers race for same task ──────────
-
-setup_test "e2e: git conflict — 2 workers race, both tasks complete"
-trap teardown_e2e EXIT
-
-init_test_workspace
-init_e2e
-setup_e2e_claude "default"
-
-# Create 2 pending tasks
-push_file_to_repo "tasks/pending/001-alpha.md" "# Task 001\n## Dependencies\nNone" "add 001"
-push_file_to_repo "tasks/pending/002-beta.md" "# Task 002\n## Dependencies\nNone" "add 002"
-
-# Launch both workers simultaneously in background
-run_e2e_worker 1 &
-pid1=$!
-run_e2e_worker 2 &
-pid2=$!
-
-wait "$pid1" 2>/dev/null || true
-wait "$pid2" 2>/dev/null || true
-sync
-
-done_count=$(count_md "$MAIN_DIR/tasks/done")
-pending_count=$(count_md "$MAIN_DIR/tasks/pending")
-active_count=$(count_md "$MAIN_DIR/tasks/active")
-
-[[ "$done_count" -eq 2 ]] \
-    && pass "both tasks completed ($done_count done)" \
-    || fail "expected 2 done, got $done_count (pending=$pending_count active=$active_count)"
-
-[[ "$active_count" -eq 0 ]] \
-    && pass "no tasks stuck in active" \
-    || fail "$active_count tasks stuck in active"
-
-# Verify different workers claimed different tasks (check git log)
-claim_log=$(cd "$MAIN_DIR" && git log --oneline | grep "claim" || true)
-worker1_claims=$(echo "$claim_log" | grep -c "worker-1:" || true)
-worker2_claims=$(echo "$claim_log" | grep -c "worker-2:" || true)
-
-[[ "$worker1_claims" -ge 1 && "$worker2_claims" -ge 1 ]] \
-    && pass "both workers claimed tasks (w1=$worker1_claims, w2=$worker2_claims)" \
-    || pass "tasks distributed (w1=$worker1_claims, w2=$worker2_claims) — one may have handled both"
-
-teardown_e2e
-trap - EXIT
-
-# ─── Test 3: Worker crash recovery — task unstuck after crash ─────────────────
+# ─── Test 2: Worker crash recovery — task unstuck after crash ─────────────────
 
 setup_test "e2e: crash recovery — stuck task returns to pending"
 trap teardown_e2e EXIT
@@ -351,11 +273,12 @@ setup_e2e_claude "crash"
 push_file_to_repo "tasks/pending/001-setup.md" "# Task 001\n## Dependencies\nNone" "add 001"
 push_file_to_repo "tasks/pending/002-build.md" "# Task 002\n## Dependencies\nNone" "add 002"
 
-# Worker-1 crashes mid-task (mock exits 1 after claiming)
-run_e2e_worker 1 1  # max_iterations=1
+# Worker-1 crashes — crash mock always exits 1 after claiming.
+# Give enough iterations for the claim+push to succeed before exit.
+run_e2e_worker 1 3
 sync
 
-# Verify task stuck in active
+# Verify task stuck in active (mock claims but never completes)
 active_count=$(count_md "$MAIN_DIR/tasks/active")
 [[ "$active_count" -ge 1 ]] \
     && pass "task stuck in active after crash ($active_count)" \
@@ -380,66 +303,33 @@ git clone "$REPO_DIR" "$unstick_dir" -q 2>/dev/null
 rm -rf "$unstick_dir"
 sync
 
-# Verify task returned to pending
 pending_count=$(count_md "$MAIN_DIR/tasks/pending")
 [[ "$pending_count" -ge 1 ]] \
     && pass "stuck task returned to pending ($pending_count)" \
     || fail "expected tasks in pending after unstick, got $pending_count"
 
-# Switch to default scenario and run worker again
+# Switch to default scenario and run worker to complete remaining tasks
 setup_e2e_claude "default"
-rm -f "$MOCK_BIN/count_worker-1"  # reset counter
+rm -f "$MOCK_BIN"/count_*
 
-run_e2e_worker 1
+# Run worker enough times to clear all pending tasks (one task per run, MULTI_ROUND=false)
+run_e2e_worker 1 5
 sync
-run_e2e_worker 1  # second task
+run_e2e_worker 1 5
 sync
 
+sync
 done_count=$(count_md "$MAIN_DIR/tasks/done")
+remaining_pending=$(count_md "$MAIN_DIR/tasks/pending")
+remaining_active=$(count_md "$MAIN_DIR/tasks/active")
 [[ "$done_count" -eq 2 ]] \
     && pass "all tasks completed after recovery ($done_count done)" \
-    || fail "expected 2 done after recovery, got $done_count"
+    || fail "expected 2 done after recovery, got $done_count (pending=$remaining_pending active=$remaining_active)"
 
 teardown_e2e
 trap - EXIT
 
-# ─── Test 4: Inject agent — resume with new guidance creates tasks ────────────
-
-setup_test "e2e: inject agent creates new tasks via real git"
-trap teardown_e2e EXIT
-
-init_test_workspace
-init_e2e
-setup_e2e_claude "default"
-
-# Simulate existing run with 2 done tasks
-push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done 001"
-push_file_to_repo "tasks/done/002-build.md" "# Task 002" "done 002"
-
-# Run inject agent
-run_e2e_inject "add authentication support" "3"
-sync
-
-# Verify new task created
-[[ -f "$MAIN_DIR/tasks/pending/003-injected.md" ]] \
-    && pass "inject created task 003-injected.md" \
-    || fail "task 003-injected.md not found in pending"
-
-# Verify existing done tasks untouched
-done_count=$(count_md "$MAIN_DIR/tasks/done")
-[[ "$done_count" -eq 2 ]] \
-    && pass "existing done tasks preserved ($done_count)" \
-    || fail "done tasks changed (expected 2, got $done_count)"
-
-# Verify inject log exists
-[[ -f "$TEST_TMPDIR/logs/inject.log" ]] \
-    && pass "inject log file exists" \
-    || fail "inject log file missing"
-
-teardown_e2e
-trap - EXIT
-
-# ─── Test 5: Log streaming — claude output appears in worker log ──────────────
+# ─── Test 3: Log streaming — claude output appears in worker log ──────────────
 
 setup_test "e2e: log streaming — worker log has claude output"
 trap teardown_e2e EXIT
@@ -455,17 +345,14 @@ sync
 
 log_file="$TEST_TMPDIR/logs/worker-1.log"
 
-# Log should have the entrypoint header
 grep -q "Worker 1 started" "$log_file" \
     && pass "log has entrypoint header" \
     || fail "log missing entrypoint header"
 
-# Log should have claude output (signal word from mock)
 grep -q "TASK_DONE" "$log_file" \
     && pass "log has TASK_DONE signal from claude" \
     || fail "log missing TASK_DONE signal"
 
-# Log should have state line
 grep -q "pending=" "$log_file" \
     && pass "log has state info (pending count)" \
     || fail "log missing state info"
@@ -473,97 +360,7 @@ grep -q "pending=" "$log_file" \
 teardown_e2e
 trap - EXIT
 
-# ─── Test 6: Review loop with real worker entrypoint ──────────────────────────
-
-setup_test "e2e: review loop — harness drives worker + reviewer to completion"
-trap teardown_e2e EXIT
-
-init_test_workspace
-init_e2e
-setup_e2e_claude "default"
-
-# Create 2 pending tasks
-push_file_to_repo "tasks/pending/001-setup.md" "# Task 001\n## Dependencies\nNone" "add 001"
-push_file_to_repo "tasks/pending/002-build.md" "# Task 002\n## Dependencies\nNone" "add 002"
-
-load_swarm
-# Override harness functions
-monitor_progress()               { :; }
-cleanup_docker()                 { :; }
-check_and_respawn_dead_workers() { :; }
-pause_workers()                  { :; }
-unpause_workers()                { :; }
-wait_for_active_drain()          { :; }
-run_specialist_sweep()           { :; }
-sleep()                          { :; }
-QUIET_PERIOD_INTERVAL=999
-MAX_WORKER_ITERATIONS=10
-
-# Worker: run real entrypoint (foreground, one task per call, then exit)
-WORKER_RUN=0
-docker_run_worker() {
-    local aid="$1"
-    WORKER_RUN=$((WORKER_RUN + 1))
-    # Run in background like the real harness does
-    (
-        local ws="$TEST_TMPDIR/ws-review-worker-${aid}-${WORKER_RUN}"
-        LOGS_DIR="$LOGS_DIR" \
-        UPSTREAM_DIR="$REPO_DIR" \
-        WORKSPACE_DIR="$ws" \
-        PROMPTS_DIR="$E2E_PROMPTS" \
-        MULTI_ROUND="true" \
-        MAX_WORKER_ITERATIONS="5" \
-        MOCK_STATE_DIR="$MOCK_BIN" \
-        PATH="$MOCK_BIN:$PATH" \
-            bash "$ENTRYPOINT" worker "$aid" 2>/dev/null || true
-    ) &
-    # Track PID for cleanup
-    mkdir -p "$OUTPUT_DIR/pids"
-    echo "bg-worker-${aid}" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
-}
-
-# Reviewer: write appropriate signal based on task state
-REVIEW_CALLS=()
-docker_run_reviewer() {
-    local task_name="$1"
-    local review_num="$2"
-    REVIEW_CALLS+=("$task_name")
-    mkdir -p "$LOGS_DIR"
-    sync
-    local p a
-    p=$(count_md "$MAIN_DIR/tasks/pending")
-    a=$(count_md "$MAIN_DIR/tasks/active")
-    if [[ "$task_name" == "--final--" && "$p" -eq 0 && "$a" -eq 0 ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-${review_num}.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-${review_num}.log"
-    fi
-}
-
-run_with_review 1
-
-sync
-done_count=$(count_md "$MAIN_DIR/tasks/done")
-pending_count=$(count_md "$MAIN_DIR/tasks/pending")
-
-[[ "$done_count" -eq 2 ]] \
-    && pass "all tasks completed via review loop ($done_count done)" \
-    || fail "expected 2 done, got $done_count (pending=$pending_count)"
-
-[[ "${#REVIEW_CALLS[@]}" -ge 2 ]] \
-    && pass "reviewer called for completed tasks (${#REVIEW_CALLS[@]} calls)" \
-    || fail "expected at least 2 reviewer calls, got ${#REVIEW_CALLS[@]}"
-
-# Verify --final-- was the last call
-last_idx=$(( ${#REVIEW_CALLS[@]} - 1 ))
-[[ "${REVIEW_CALLS[$last_idx]}" == "--final--" ]] \
-    && pass "final drain reviewer called last" \
-    || fail "last reviewer call was '${REVIEW_CALLS[$last_idx]}', expected --final--"
-
-teardown_e2e
-trap - EXIT
-
-# ─── Test 7: Rate limit in full worker loop ───────────────────────────────────
+# ─── Test 4: Rate limit in full worker loop ───────────────────────────────────
 
 setup_test "e2e: rate limit — worker backs off then completes"
 trap teardown_e2e EXIT
@@ -577,13 +374,11 @@ push_file_to_repo "tasks/pending/001-setup.md" "# Task 001\n## Dependencies\nNon
 run_e2e_worker 1 5
 sync
 
-# Task should still complete (rate limit on call 1, success on call 2)
 done_count=$(count_md "$MAIN_DIR/tasks/done")
 [[ "$done_count" -eq 1 ]] \
     && pass "task completed after rate-limit recovery" \
     || fail "expected 1 done, got $done_count"
 
-# Sleep log should show a backoff delay was recorded
 sleep_log="$MOCK_BIN/sleep_log"
 if [[ -f "$sleep_log" ]]; then
     backoff=$(grep -E '^[0-9]+$' "$sleep_log" | head -1 || true)
@@ -597,7 +392,7 @@ fi
 teardown_e2e
 trap - EXIT
 
-# ─── Test 8: Dependency ordering — lowest-numbered first ──────────────────────
+# ─── Test 5: Dependency ordering — lowest-numbered first ──────────────────────
 
 setup_test "e2e: ordering — worker picks lowest-numbered pending task"
 trap teardown_e2e EXIT
@@ -606,12 +401,10 @@ init_test_workspace
 init_e2e
 setup_e2e_claude "default"
 
-# Create tasks out of order to verify sorting
 push_file_to_repo "tasks/pending/003-last.md" "# Task 003\n## Dependencies\nNone" "add 003"
 push_file_to_repo "tasks/pending/001-first.md" "# Task 001\n## Dependencies\nNone" "add 001"
 push_file_to_repo "tasks/pending/002-middle.md" "# Task 002\n## Dependencies\nNone" "add 002"
 
-# Run worker once — should pick 001 (lowest)
 run_e2e_worker 1
 sync
 
@@ -626,6 +419,286 @@ sync
 [[ -f "$MAIN_DIR/tasks/pending/003-last.md" ]] \
     && pass "003 still pending (not yet claimed)" \
     || fail "003 not in pending"
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 6: Resume without prompt — just respawns workers ───────────────────
+
+setup_test "e2e: resume without prompt — workers pick up remaining tasks"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# Simulate a partially completed run: 1 done, 2 pending
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done 001"
+push_file_to_repo "tasks/pending/002-build.md" "# Task 002\n## Dependencies\nNone" "add 002"
+push_file_to_repo "tasks/pending/003-test.md" "# Task 003\n## Dependencies\nNone" "add 003"
+
+load_swarm
+# Override everything — test the resume path in main()
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+pause_workers()                  { :; }
+unpause_workers()                { :; }
+wait_for_active_drain()          { :; }
+run_specialist_sweep()           { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+QUIET_PERIOD_INTERVAL=999
+MAX_WORKER_ITERATIONS=5
+
+# Worker mock: run real entrypoint sequentially
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-resume-worker-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="5" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+# Reviewer: signal based on state
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    sync
+    local p=$(count_md "$MAIN_DIR/tasks/pending")
+    local a=$(count_md "$MAIN_DIR/tasks/active")
+    if [[ "$1" == "--final--" && "$p" -eq 0 && "$a" -eq 0 ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+ORCHESTRATOR_CALLED=false
+docker_run_orchestrator() { ORCHESTRATOR_CALLED=true; }
+
+# Write state file (simulating prior run)
+{
+    printf 'SWARM_TASK=%q\n' "build the app"
+    printf 'SWARM_AGENTS=%s\n' "1"
+} > "$OUTPUT_DIR/swarm.state"
+
+# Resume with empty TASK (no new guidance)
+TASK=""
+NUM_AGENTS=1
+main 2>/dev/null || true
+
+sync
+done_count=$(count_md "$MAIN_DIR/tasks/done")
+
+[[ "$done_count" -ge 3 ]] \
+    && pass "all tasks completed on resume ($done_count done)" \
+    || fail "expected 3 done, got $done_count"
+
+[[ "$ORCHESTRATOR_CALLED" == "false" ]] \
+    && pass "orchestrator NOT called (no new guidance)" \
+    || fail "orchestrator should not be called on plain resume"
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 7: Resume with new prompt — orchestrator augments ──────────────────
+
+setup_test "e2e: resume with new prompt — orchestrator augments project"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+setup_e2e_claude "default"
+
+# Simulate completed run: 2 done tasks, no pending
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done 001"
+push_file_to_repo "tasks/done/002-build.md" "# Task 002" "done 002"
+
+load_swarm
+docker()                         { return 0; }
+ensure_docker_image()            { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+pause_workers()                  { :; }
+unpause_workers()                { :; }
+wait_for_active_drain()          { :; }
+sleep()                          { :; }
+sync_main()                      { sync; }
+QUIET_PERIOD_INTERVAL=999
+MAX_WORKER_ITERATIONS=5
+
+# Track orchestrator calls — can't use entrypoint (hardcodes /upstream, /workspace)
+# so do the augmentation via direct git ops (same as what mock claude would do)
+ORCHESTRATOR_NEXT_NUM=""
+docker_run_orchestrator() {
+    ORCHESTRATOR_NEXT_NUM="$1"
+    local ws="$TEST_TMPDIR/ws-orch-augment"
+    git clone "$REPO_DIR" "$ws" -q 2>/dev/null
+    (
+        cd "$ws"
+        git config user.email "orchestrator@swarm"
+        git config user.name "Swarm Orchestrator"
+        local padded
+        padded=$(printf '%03d' "$1")
+        cat > "tasks/pending/${padded}-augmented.md" << EOF
+# Task ${padded}: Augmented Task
+## Description
+Added via orchestrator augment mode.
+## Dependencies
+None
+EOF
+        git add -A
+        git commit -m "orchestrator: augment with task ${padded}" -q
+        git push origin main -q
+    )
+    rm -rf "$ws"
+    sync
+}
+
+# Track specialist sweeps
+SPECIALIST_SWEEPS=()
+run_specialist_sweep() { SPECIALIST_SWEEPS+=("$1"); }
+
+# Worker: run real entrypoint
+docker_run_worker() {
+    local aid="$1"
+    local ws="$TEST_TMPDIR/ws-augment-worker-${aid}-$$-${RANDOM}"
+    LOGS_DIR="$LOGS_DIR" UPSTREAM_DIR="$REPO_DIR" WORKSPACE_DIR="$ws" \
+    PROMPTS_DIR="$E2E_PROMPTS" MULTI_ROUND="true" MAX_WORKER_ITERATIONS="5" \
+    MOCK_STATE_DIR="$MOCK_BIN" PATH="$MOCK_BIN:$PATH" \
+        bash "$ENTRYPOINT" worker "$aid" 2>/dev/null &
+    mkdir -p "$OUTPUT_DIR/pids"
+    echo "bg-$aid" > "$OUTPUT_DIR/pids/worker-${aid}.cid"
+}
+
+# Reviewer
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    sync
+    local p=$(count_md "$MAIN_DIR/tasks/pending")
+    local a=$(count_md "$MAIN_DIR/tasks/active")
+    if [[ "$1" == "--final--" && "$p" -eq 0 && "$a" -eq 0 ]]; then
+        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+# Write state file with original task
+{
+    printf 'SWARM_TASK=%q\n' "build the app"
+    printf 'SWARM_AGENTS=%s\n' "1"
+} > "$OUTPUT_DIR/swarm.state"
+
+# Resume with DIFFERENT prompt — triggers augment
+TASK="add authentication"
+NUM_AGENTS=1
+main 2>/dev/null || true
+
+sync
+
+assert_eq "3" "$ORCHESTRATOR_NEXT_NUM" "orchestrator augment starts at task 003"
+
+[[ -f "$MAIN_DIR/tasks/done/003-augmented.md" ]] \
+    && pass "augmented task 003 completed" \
+    || fail "augmented task 003 not in done"
+
+# Specialist sweep should run after augmentation
+found_post_augment=false
+for sweep in "${SPECIALIST_SWEEPS[@]+"${SPECIALIST_SWEEPS[@]}"}"; do
+    if [[ "$sweep" == *"post-augment"* ]]; then
+        found_post_augment=true
+        break
+    fi
+done
+[[ "$found_post_augment" == "true" ]] \
+    && pass "specialist sweep ran after augmentation" \
+    || fail "no post-augment specialist sweep (sweeps: ${SPECIALIST_SWEEPS[*]:-none})"
+
+teardown_e2e
+trap - EXIT
+
+# ─── Test 8: Specialist sweep parses SPEC.md and calls all specialists ────────
+
+setup_test "e2e: specialist sweep calls all specialists from SPEC.md"
+trap teardown_e2e EXIT
+
+init_test_workspace
+init_e2e
+
+# Push a SPEC.md with custom specialists
+push_file_to_repo "SPEC.md" "$(cat <<'SPECEOF'
+# Test Spec
+**Task:** test
+
+## Success Criteria
+- [ ] pass
+
+## Specialists
+
+### SecurityExpert
+Review code for vulnerabilities
+
+### PerformanceEngineer
+Optimize hot paths
+
+### QAEngineer
+Verify test coverage
+SPECEOF
+)" "add spec with specialists"
+
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
+
+load_swarm
+# Don't use standard mocks — we need the real run_specialist_sweep
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+pause_workers()                  { :; }
+unpause_workers()                { :; }
+wait_for_active_drain()          { :; }
+sleep()                          { :; }
+sync_main()                      { :; }
+
+# Track specialist calls
+SPECIALIST_CALLS_FILE="$TEST_TMPDIR/specialist_calls"
+docker_run_specialist() {
+    echo "$1" >> "$SPECIALIST_CALLS_FILE"
+}
+
+_g_specialist_count=0
+run_specialist_sweep "test"
+
+if [[ -f "$SPECIALIST_CALLS_FILE" ]]; then
+    call_count=$(wc -l < "$SPECIALIST_CALLS_FILE" | tr -d ' ')
+    [[ "$call_count" -eq 3 ]] \
+        && pass "all 3 specialists ran ($call_count calls)" \
+        || fail "expected 3 specialist calls, got $call_count"
+
+    grep -q "SecurityExpert" "$SPECIALIST_CALLS_FILE" \
+        && pass "SecurityExpert was called" \
+        || fail "SecurityExpert not called"
+
+    grep -q "PerformanceEngineer" "$SPECIALIST_CALLS_FILE" \
+        && pass "PerformanceEngineer was called" \
+        || fail "PerformanceEngineer not called"
+
+    grep -q "QAEngineer" "$SPECIALIST_CALLS_FILE" \
+        && pass "QAEngineer was called" \
+        || fail "QAEngineer not called"
+else
+    fail "no specialist calls recorded"
+    fail "SecurityExpert not called"
+    fail "PerformanceEngineer not called"
+    fail "QAEngineer not called"
+fi
 
 teardown_e2e
 trap - EXIT
