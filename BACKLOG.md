@@ -6,12 +6,12 @@ Items ranked by priority for local (Mac) development workflow.
 
 ### Worker logs don't stream during claude session
 **Bug** · `docker/entrypoint.sh` — **Fix implemented, needs real-world validation**
-Worker logs show the startup header (`Worker N started`, `State: pending=X`) but then go silent for 15-30 minutes until the claude session completes and dumps all output at once. Root cause: `claude -p` detects stdout is a pipe and block-buffers (Node.js default for non-TTY stdout). `tee -a` only helps if the upstream process writes incrementally.
-**Fix**: `run_claude()` helper uses `script -qfc` to wrap `claude` in a PTY so it sees a terminal → line-buffered output. `tr -d '\r'` strips PTY carriage returns.
-- [x] Investigate `stdbuf -oL claude ...` — doesn't work (Node.js doesn't use C stdio)
-- [x] Investigate `script -q /dev/null claude ...` — **this is the fix** (`script -qfc`)
-- [ ] Validate fix in a real swarm run (PTY streaming, signal detection, rate-limit grep all work)
-- [ ] If `script` adds noise or edge cases, fall back to `--output-format stream-json` with JSON parsing
+Worker logs show the startup header then go silent for 15-30 min until claude finishes. Root cause: `claude -p` block-buffers to pipes, and `output=$(...)` re-buffers even with a PTY.
+**Fix**: `run_claude()` uses `script` for PTY + writes to `CLAUDE_OUTPUT_FILE` via `tee` (no subshell capture). Worker greps the file for signals/rate-limit after completion. Log file streams in real-time.
+- [x] `stdbuf -oL` — doesn't work (Node.js doesn't use C stdio)
+- [x] `script -qfc` PTY — works but `output=$(...)` re-buffers
+- [x] Refactored: removed `output=$(...)`, write to temp file, grep for signals
+- [ ] Validate in real swarm run
 
 ### stuck detection skips when done_count = 0
 **Bug** · `swarm:796`

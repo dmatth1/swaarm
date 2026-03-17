@@ -18,11 +18,11 @@ if [[ -n "${MODEL:-}" ]]; then
     CLAUDE_MODEL_FLAG="--model $MODEL"
 fi
 
-# Run claude with unbuffered output for real-time log streaming.
-# Without this, `claude -p` detects it's writing to a pipe and block-buffers,
-# making logs go silent for the entire 15-30 min session.
-# `script -qfc` creates a PTY so claude sees a terminal → line-buffered output.
-# Sets the caller's $output variable with the full response text.
+# Run claude with real-time log streaming.
+# Problem: `claude -p` block-buffers when stdout is a pipe, and `output=$(...)`
+# re-buffers even with a PTY because bash waits for the subshell to complete.
+# Fix: write to a temp file via tee (no subshell capture), stream to log in
+# real-time via PTY. Sets CLAUDE_OUTPUT_FILE for callers to grep afterwards.
 run_claude() {
     local _rc_prompt="$1"
     local _rc_log="$2"
@@ -31,13 +31,16 @@ run_claude() {
     _rc_prompt_file=$(mktemp)
     printf '%s' "$_rc_prompt" > "$_rc_prompt_file"
 
-    # script creates a PTY so claude sees a terminal → streams output.
+    CLAUDE_OUTPUT_FILE=$(mktemp)
+
+    # script creates a PTY so claude sees a terminal → streams output line by line.
+    # tee writes to both the log file (real-time) and temp output file (for signal grep).
+    # No output=$(...) wrapper — that would re-buffer everything.
     # macOS and Linux have incompatible script flags.
-    # tr -d '\r': strip carriage returns added by PTY.
     if [[ "$(uname)" == "Darwin" ]]; then
-        output=$(script -q /dev/null sh -c "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" 2>&1 | tr -d '\r' | tee -a "$_rc_log") || true
+        script -q /dev/null sh -c "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" 2>&1 | tr -d '\r' | tee -a "$_rc_log" > "$CLAUDE_OUTPUT_FILE" || true
     else
-        output=$(script -qfc "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" /dev/null 2>&1 | tr -d '\r' | tee -a "$_rc_log") || true
+        script -qfc "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" /dev/null 2>&1 | tr -d '\r' | tee -a "$_rc_log" > "$CLAUDE_OUTPUT_FILE" || true
     fi
 
     rm -f "$_rc_prompt_file"
@@ -102,8 +105,8 @@ $(cat /prompts/task-format.md)"
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
-    local output
     run_claude "$prompt" "$log_file"
+    rm -f "$CLAUDE_OUTPUT_FILE"
 
     echo "=== Orchestrator finished $(date) ===" >> "$log_file"
 }
@@ -146,8 +149,8 @@ $(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
 
     echo "Inject agent adding tasks for: $guidance" >> "$log_file"
 
-    local output
     run_claude "$prompt" "$log_file"
+    rm -f "$CLAUDE_OUTPUT_FILE"
 
     echo "=== Inject agent finished $(date) ===" >> "$log_file"
 }
@@ -182,8 +185,8 @@ run_reviewer() {
 $(cat /prompts/task-format.md)"
     prompt="${SECURITY_NOTICE}${prompt}"
 
-    local output
     run_claude "$prompt" "$log_file"
+    rm -f "$CLAUDE_OUTPUT_FILE"
 
     echo "=== Reviewer ${review_num} finished $(date) ===" >> "$log_file"
 }
@@ -226,8 +229,8 @@ run_specialist() {
 $(cat /prompts/task-format.md)"
     prompt="${SECURITY_NOTICE}${prompt}"
 
-    local output
     run_claude "$prompt" "$log_file"
+    rm -f "$CLAUDE_OUTPUT_FILE"
 
     echo "=== Specialist ${specialist_name} (${specialist_num}) finished $(date) ===" >> "$log_file"
 }
@@ -297,18 +300,19 @@ run_worker() {
         echo -e "\n--- Worker $agent_id (pending attempt, $(date)) ---" >> "$log_file"
         echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
 
-        # Run one agent session
-        local output
+        # Run one agent session — output streams to log in real-time,
+        # full text saved to CLAUDE_OUTPUT_FILE for signal/rate-limit grep.
         run_claude "$prompt" "$log_file"
 
         # Check for rate-limit — keep task claimed, sleep, retry (does NOT count as an iteration)
-        if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429 \|hit your limit\|resets.*UTC"; then
+        if grep -qi "rate limit\|too many requests\|quota exceeded\|429 \|hit your limit\|resets.*UTC" "$CLAUDE_OUTPUT_FILE" 2>/dev/null; then
             local delay_idx=$(( rate_limit_attempts < ${#backoff_delays[@]} ? rate_limit_attempts : ${#backoff_delays[@]} - 1 ))
             local base_delay="${backoff_delays[$delay_idx]}"
             local jitter=$(( (RANDOM % 41) + 80 ))
             local sleep_secs=$(( base_delay * jitter / 100 ))
             rate_limit_attempts=$(( rate_limit_attempts + 1 ))
             echo "[rate-limit] attempt ${rate_limit_attempts}, sleeping ${sleep_secs}s (base=${base_delay}s, jitter=${jitter}%)" >> "$log_file"
+            rm -f "$CLAUDE_OUTPUT_FILE"
             sleep "$sleep_secs"
             continue
         fi
@@ -318,21 +322,25 @@ run_worker() {
         if [[ $iteration -gt $max_iterations ]]; then
             echo "Worker $agent_id: reached max iterations ($max_iterations)" >> "$log_file"
             echo "=== Worker $agent_id MAXED OUT at $(date) ===" >> "$log_file"
+            rm -f "$CLAUDE_OUTPUT_FILE"
             exit 0
         fi
         rate_limit_attempts=0
 
         # Check completion signals
-        if echo "$output" | grep -q "ALL_DONE\|NO_TASKS\|TASK_DONE"; then
+        if grep -q "ALL_DONE\|NO_TASKS\|TASK_DONE" "$CLAUDE_OUTPUT_FILE" 2>/dev/null; then
             if [[ "${MULTI_ROUND:-false}" == "true" ]]; then
                 # In multi-round mode, harness kills workers — never self-exit on signals
+                rm -f "$CLAUDE_OUTPUT_FILE"
                 sleep 2
                 continue
             fi
             echo "Worker $agent_id: signaled completion" >> "$log_file"
             echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
+            rm -f "$CLAUDE_OUTPUT_FILE"
             exit 0
         fi
+        rm -f "$CLAUDE_OUTPUT_FILE"
 
         sleep 2
     done
