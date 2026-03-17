@@ -24,11 +24,12 @@ No test exercises the full coordination loop end-to-end. Approach: override `doc
 - [ ] Implement `tests/test_e2e.sh` with 3 tasks + 2 workers
 
 ### Reviewer does not verify task artifact compliance
-**Bug** · `prompts/reviewer.md`
+**Bug** · `prompts/reviewer.md` — **Fixed (prompt change)**
 The reviewer checks if code compiles and unit tests pass, but does not verify that workers actually produced the artifacts required by task acceptance criteria (e.g. screenshots, test output files, verification reports). Workers can mark tasks DONE while skipping required verification steps. Discovered during ProQ4 run where 11 UI tasks were completed without any Xvfb screenshot evidence despite task descriptions requiring it.
-- [ ] Update reviewer prompt to parse acceptance criteria for required artifacts (files, screenshots, test outputs)
-- [ ] Reviewer should check `git log` for expected committed files before signaling REVIEW_DONE
-- [ ] If required artifacts are missing, reviewer should create a fix task or reject the completion
+- [x] Update reviewer prompt to parse acceptance criteria for required artifacts (files, screenshots, test outputs)
+- [x] Reviewer checks `git log --name-only` for expected committed files
+- [x] If required artifacts are missing, reviewer creates a fix task
+- [x] ALL_COMPLETE gated on all required artifacts being committed
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering artifact compliance check
 
 

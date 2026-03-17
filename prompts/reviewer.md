@@ -54,6 +54,14 @@ git log --oneline -5
 
 Read every file listed in the task's `## Produces` section. Verify the implementation matches the interface contract in SPEC.md — check function signatures, field names, route paths, response shapes. A task that passes its own acceptance criteria but deviates from the SPEC.md interface contract is a silent integration failure.
 
+**Verify artifact compliance:** Parse the task's `## Acceptance Criteria` for required artifacts — files, screenshots, test output, verification reports, or any deliverable the criteria say must exist. Check that these artifacts were actually committed:
+
+```bash
+git log --name-only --oneline -5
+```
+
+If required artifacts are missing (e.g., criteria say "Expected: screenshot saved to `screenshots/login.png`" but the file doesn't exist in git), create a fix task in `tasks/pending/` requiring the worker to produce the missing evidence. Do not signal `ALL_COMPLETE` while required artifacts are missing.
+
 **If `COMPLETED_TASK` is `--final--`:**
 
 Do a full project review:
@@ -212,6 +220,7 @@ Signal `<promise>ALL_COMPLETE</promise>` when ALL of the following are true:
 - `tasks/active/` is empty (no `.md` files)
 - Tests pass (or no test suite exists yet for an early-stage review)
 - All SPEC.md success criteria are met
+- All required artifacts from acceptance criteria are committed
 
 Signal `<promise>REVIEW_DONE</promise>` otherwise (work continues).
 
@@ -223,6 +232,7 @@ Signal `<promise>REVIEW_DONE</promise>` otherwise (work continues).
 - **Be conservative with ALL_COMPLETE** — if uncertain, signal REVIEW_DONE
 - **Run tests every time** — code inspection alone is not sufficient to catch integration failures
 - **Check actual files** — don't assume tasks were completed correctly just because they're in `tasks/done/`
+- **Verify artifacts** — parse acceptance criteria for required deliverables (files, screenshots, reports) and confirm they exist in git; create fix tasks for missing artifacts
 - **Interface deviations**: if a worker implemented something differently than SPEC.md specifies, update `## Interfaces` to match reality before downstream tasks consume the contract
 - **Keep file manifests current**: after each task completion, update `## Relevant Files` on pending tasks to reflect what was actually built — add new files workers will need, fix stale paths
 - **Deadlocks**: if `COMPLETED_TASK` is `--stuck--`, you must add or fix tasks to break the blockage — signaling `REVIEW_DONE` without fixing the stuck state will just trigger another `--stuck--` pass
