@@ -251,18 +251,25 @@ Both files use `{{TASK}}` and `{{AGENT_ID}}` placeholders substituted at runtime
 
 ## swarm vs Claude Code Agent Teams
 
-Claude Code has a native [agent teams feature](https://docs.claude.ai/en/agent-teams) (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`).
+Claude Code has a native [agent teams feature](https://code.claude.com/docs/en/agent-teams) (experimental, disabled by default).
 
 | | swarm | Agent Teams |
 |--|--|--|
-| Interface | Fire-and-forget CLI | Interactive (lives in your session) |
-| Coordination | Bare git repo + file moves | Native task list + mailbox |
-| Agent comms | None (git only) | Direct peer-to-peer messaging |
-| Visibility | Log files, `status` command | tmux split panes / Shift+Down |
-| Human steering | Not needed | Redirect agents mid-task |
-| Best for | Automated pipelines, unattended | Interactive development |
+| **Status** | Stable | Experimental (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) |
+| **Interface** | Fire-and-forget CLI | Interactive (lives in your terminal session) |
+| **Coordination** | Bare git repo + file moves | Shared task list + mailbox |
+| **Agent comms** | None (git only) | Direct peer-to-peer messaging + broadcast |
+| **Isolation** | Each agent in its own Docker container | Shared filesystem, no container isolation |
+| **Built-in QA** | Reviewer agent runs tests, adds fix tasks automatically | No built-in QA loop — lead coordinates manually |
+| **Rate limits** | Automatic exponential backoff (5m → 4hr) | No built-in handling |
+| **Resume** | `./swarm "Continue" -o <dir>` — fully recoverable | `/resume` does not restore teammates |
+| **Remote push** | `--repo` mirrors to GitHub automatically | No built-in remote push |
+| **Visibility** | Log files, `status` command, `logs` tail | tmux split panes / Shift+Down |
+| **Human steering** | Not needed (but `inject` adds guidance mid-run) | Redirect agents mid-task, message teammates directly |
+| **Token cost** | Lower (stateless sessions, re-reads git each turn) | Higher (each teammate has persistent full context) |
+| **Best for** | Automated pipelines, unattended runs, CI | Interactive development, research, code review |
 
-Use swarm when you want to hand off a task and walk away. Use Agent Teams when you want to observe and steer.
+Use swarm when you want to hand off a task and walk away. Use Agent Teams when you want to observe and steer in real time.
 
 ## Contributing
 
