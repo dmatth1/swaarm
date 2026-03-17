@@ -556,7 +556,6 @@ docker_run_worker() {
 docker_run_reviewer() {
     local task_name="$1"
     local review_num="$2"
-    local review_mode="${3:-full}"
     local container_name="swarm-${RUN_ID}-reviewer-${review_num}"
 
     local oauth_token
@@ -574,12 +573,25 @@ docker_run_reviewer() {
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e COMPLETED_TASK="$task_name" \
         -e REVIEW_NUM="$review_num" \
-        -e REVIEW_MODE="$review_mode" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
         ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
         "$DOCKER_IMAGE" \
         reviewer || true
+}
+
+# Compute the next available task number across pending/active/done directories.
+compute_next_task_num() {
+    local max_num=0 f num
+    for f in "$MAIN_DIR/tasks/pending/"*.md \
+              "$MAIN_DIR/tasks/active/"*.md \
+              "$MAIN_DIR/tasks/done/"*.md; do
+        [[ -f "$f" ]] || continue
+        num=$(basename "$f" | grep -o '^[0-9]*' || echo 0)
+        num=$((10#$num))
+        [[ "$num" -gt "$max_num" ]] && max_num="$num"
+    done
+    echo $(( max_num + 1 ))
 }
 
 docker_run_specialist() {
@@ -742,7 +754,7 @@ run_with_review() {
     local monitor_pid=$!
 
     local reviewed=()
-    local blocked_reviewed=()
+    local blocked_handled=()
     local review_count=0
     # _g_specialist_count is NOT reset here — it may already be non-zero from a
     # pre-flight sweep run before workers started; preserve continuity of numbering.
@@ -750,8 +762,8 @@ run_with_review() {
     local all_complete=false
     local stuck_cycles=0
     local max_stuck_cycles=3
-    local last_quiet_period_at=0
-    local quiet_period_interval="${QUIET_PERIOD_INTERVAL:-10}"
+    local last_restructure_at=0
+    local restructure_interval="${RESTRUCTURE_INTERVAL:-10}"
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -762,7 +774,7 @@ run_with_review() {
 
         local new_reviews_this_cycle=0
 
-        # Scan done/ for unreviewed tasks
+        # Scan done/ for unreviewed tasks — run test suite after each completion
         local task_file task_name
         for task_file in "$MAIN_DIR/tasks/done/"*.md; do
             [[ -f "$task_file" ]] || continue
@@ -789,29 +801,31 @@ run_with_review() {
                 break
             fi
 
-            log "Running quick reviewer ${review_count} for: $task_name"
-            docker_run_reviewer "$task_name" "$review_count" "quick"
+            log "Running reviewer ${review_count} for: $task_name"
+            docker_run_reviewer "$task_name" "$review_count"
             reviewed+=("$task_name")
 
-            # Ignore ALL_COMPLETE from regular task reviewers — only the final
-            # drain reviewer should signal completion (after the final specialist sweep).
-            if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                log "Reviewer signaled ALL_COMPLETE (deferring to final drain)"
+            # If tests failed, trigger orchestrator immediately to add fix tasks
+            if grep -q "TESTS_FAIL" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                log "Tests failing after ${task_name} — triggering orchestrator to add fix tasks"
+                local next_num
+                next_num=$(compute_next_task_num)
+                docker_run_orchestrator "$next_num"
             fi
         done
 
-        # Scan pending/ for BLOCKED tasks (worker gave up, needs reviewer intervention)
+        # Scan pending/ for BLOCKED tasks — orchestrator decomposes, hints, or escalates
         if [[ "$all_complete" == "false" ]]; then
             for task_file in "$MAIN_DIR/tasks/pending/BLOCKED-"*.md; do
                 [[ -f "$task_file" ]] || continue
                 task_name=$(basename "$task_file")
 
-                local already_blocked_reviewed=false
-                local br
-                for br in "${blocked_reviewed[@]+"${blocked_reviewed[@]}"}"; do
-                    [[ "$br" == "$task_name" ]] && already_blocked_reviewed=true && break
+                local already_blocked_handled=false
+                local bh
+                for bh in "${blocked_handled[@]+"${blocked_handled[@]}"}"; do
+                    [[ "$bh" == "$task_name" ]] && already_blocked_handled=true && break
                 done
-                [[ "$already_blocked_reviewed" == "true" ]] && continue
+                [[ "$already_blocked_handled" == "true" ]] && continue
 
                 review_count=$((review_count + 1))
                 new_reviews_this_cycle=$((new_reviews_this_cycle + 1))
@@ -822,27 +836,26 @@ run_with_review() {
                     break
                 fi
 
-                log "Running quick reviewer ${review_count} for blocked task: $task_name"
-                docker_run_reviewer "$task_name" "$review_count" "quick"
-                blocked_reviewed+=("$task_name")
-
-                # Ignore ALL_COMPLETE from blocked-task reviewers — defer to final drain.
-                if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                    log "Reviewer signaled ALL_COMPLETE (deferring to final drain)"
-                fi
+                log "Blocked task detected: ${task_name} — triggering orchestrator (${review_count})..."
+                local next_num
+                next_num=$(compute_next_task_num)
+                docker_run_orchestrator "$next_num"
+                blocked_handled+=("$task_name")
             done
         fi
 
-        # Periodic full review + specialist sweep (every N completions, concurrent with workers)
+        # Periodic orchestrator + specialist sweep (every N completions, concurrent with workers)
         if [[ "$all_complete" == "false" ]]; then
             local current_done
             current_done=$(done_count)
-            if [[ "$current_done" -ge $(( last_quiet_period_at + quiet_period_interval )) && "$current_done" -gt 0 ]]; then
-                last_quiet_period_at="$current_done"
+            if [[ "$current_done" -ge $(( last_restructure_at + restructure_interval )) && "$current_done" -gt 0 ]]; then
+                last_restructure_at="$current_done"
 
                 review_count=$((review_count + 1))
-                log "Running full review at $current_done tasks (${review_count})..."
-                docker_run_reviewer "--full-review--" "$review_count" "full"
+                log "Running periodic orchestrator at $current_done tasks (${review_count})..."
+                local next_num
+                next_num=$(compute_next_task_num)
+                docker_run_orchestrator "$next_num"
 
                 run_specialist_sweep "at ${current_done} tasks"
             fi
@@ -854,7 +867,7 @@ run_with_review() {
             p_count=$(pending_count)
             a_count=$(active_count)
             if [[ "$p_count" -eq 0 && "$a_count" -eq 0 ]]; then
-                # Queue fully drained — run final specialist sweep then confirmation pass
+                # Queue fully drained — final specialist sweep then test confirmation
                 stuck_cycles=0
                 run_specialist_sweep "final"
                 review_count=$((review_count + 1))
@@ -862,10 +875,24 @@ run_with_review() {
                     warn "Max reviews ($max_reviews) reached — forcing stop"
                     all_complete=true
                 else
-                    log "Running final drain reviewer (${review_count})..."
+                    log "Running final test review (${review_count})..."
                     docker_run_reviewer "--final--" "$review_count"
-                    if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                        log "Reviewer signaled ALL_COMPLETE"
+                    if grep -q "TESTS_PASS" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                        log "Tests passing and queue empty — project complete"
+                        all_complete=true
+                    elif grep -q "TESTS_FAIL" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
+                        log "Tests failing at final drain — triggering orchestrator to add fix tasks"
+                        local next_num
+                        next_num=$(compute_next_task_num)
+                        docker_run_orchestrator "$next_num"
+                        # If orchestrator added no tasks, there's nothing more to do
+                        if [[ "$(pending_count)" -eq 0 ]]; then
+                            warn "Tests failing but orchestrator added no fix tasks — forcing stop"
+                            all_complete=true
+                        fi
+                    else
+                        # No test signal (no test suite yet) — treat as complete
+                        log "No test result from final reviewer — assuming project complete"
                         all_complete=true
                     fi
                 fi
@@ -879,13 +906,11 @@ run_with_review() {
                         warn "Max reviews ($max_reviews) reached — forcing stop"
                         all_complete=true
                     else
-                        log "Stuck state detected (${stuck_cycles} idle cycles) — running stuck reviewer (${review_count})..."
-                        docker_run_reviewer "--stuck--" "$review_count"
+                        log "Stuck state detected (${stuck_cycles} idle cycles) — triggering orchestrator (${review_count})..."
+                        local next_num
+                        next_num=$(compute_next_task_num)
+                        docker_run_orchestrator "$next_num"
                         stuck_cycles=0
-                        if grep -q "ALL_COMPLETE" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
-                            log "Reviewer signaled ALL_COMPLETE"
-                            all_complete=true
-                        fi
                     fi
                 fi
             else

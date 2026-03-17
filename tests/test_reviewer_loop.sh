@@ -14,21 +14,22 @@ setup_review_mocks() {
     cleanup_docker()                 { :; }
     check_and_respawn_dead_workers() { :; }
     run_specialist_sweep()           { :; }
+    docker_run_orchestrator()        { :; }
     # Override sleep builtin to avoid delays
     sleep()                          { :; }
     # sync_main is a no-op: MAIN_DIR is pre-populated by push_file_to_repo
     # (which already pulls). Mocking prevents git pull from reverting any
     # in-test filesystem mutations made by docker_run_reviewer mocks.
     sync_main()                      { :; }
-    # Prevent quiet periods from firing during tests (unless explicitly lowered)
-    QUIET_PERIOD_INTERVAL=999
+    # Prevent periodic restructuring from firing during tests (unless explicitly lowered)
+    RESTRUCTURE_INTERVAL=999
     # Small limit so infinite-loop bugs surface quickly (max_reviews = 5 * agents)
     MAX_WORKER_ITERATIONS=5
 }
 
-# ─── Test 1: ALL_COMPLETE from regular reviewer defers to final drain ─────────
+# ─── Test 1: TESTS_PASS from regular reviewer does not exit; --final-- drain does
 
-setup_test "reviewer loop: ALL_COMPLETE from regular reviewer defers to --final-- drain"
+setup_test "reviewer loop: TESTS_PASS from regular reviewer defers to --final-- drain"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -41,13 +42,9 @@ REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    # Regular reviewer signals ALL_COMPLETE, but loop should NOT terminate here —
+    # Per-task reviewer signals TESTS_PASS — loop should NOT terminate here;
     # it must proceed to final specialist sweep + --final-- drain reviewer.
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
@@ -60,9 +57,9 @@ assert_eq "--final--" "${REVIEWER_CALLS[1]}" "second call is --final-- drain"
 teardown_test
 trap - EXIT
 
-# ─── Test 2: REVIEW_DONE continues loop; second done task is also reviewed ────
+# ─── Test 2: TESTS_PASS continues loop; second done task is also reviewed ─────
 
-setup_test "reviewer loop: REVIEW_DONE continues loop to next task"
+setup_test "reviewer loop: TESTS_PASS continues loop to next task"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -76,11 +73,7 @@ REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
@@ -109,11 +102,7 @@ REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
@@ -125,9 +114,9 @@ assert_eq "--final--" "${REVIEWER_CALLS[1]}" "second call is --final-- drain"
 teardown_test
 trap - EXIT
 
-# ─── Test 4: Stuck reviewer fired after 3 idle cycles ────────────────────────
+# ─── Test 4: Stuck orchestrator fired after 3 idle cycles ────────────────────
 
-setup_test "reviewer loop: --stuck-- reviewer fired after 3 idle cycles"
+setup_test "reviewer loop: orchestrator fired after 3 idle cycles (stuck state)"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -138,31 +127,35 @@ push_file_to_repo "tasks/pending/002-build.md" "# Task 002" "pending"
 load_swarm
 setup_review_mocks
 
+ORCHESTRATOR_CALLS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("stuck")
+    # Resolve the stuck state by moving the pending task to done
+    # so the loop can proceed to final drain
+    mkdir -p "$MAIN_DIR/tasks/done"
+    mv "$MAIN_DIR/tasks/pending/002-build.md" "$MAIN_DIR/tasks/done/002-build.md" 2>/dev/null || true
+}
+
 REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--stuck--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
 
-# Verify --stuck-- was called (and that there were at least 2 calls:
-# one for the initial done task review, one for --stuck--)
+# Verify orchestrator was called to resolve the stuck state
 found_stuck=false
-for call in "${REVIEWER_CALLS[@]+"${REVIEWER_CALLS[@]}"}"; do
-    [[ "$call" == "--stuck--" ]] && found_stuck=true && break
+for call in "${ORCHESTRATOR_CALLS[@]+"${ORCHESTRATOR_CALLS[@]}"}"; do
+    [[ "$call" == "stuck" ]] && found_stuck=true && break
 done
 [[ "$found_stuck" == "true" ]] \
-    && pass "--stuck-- reviewer was called after idle cycles" \
-    || fail "--stuck-- reviewer was not called"
-[[ "${#REVIEWER_CALLS[@]}" -ge 2 ]] \
-    && pass "at least 2 reviewer calls (initial review + stuck)" \
-    || fail "expected at least 2 reviewer calls, got ${#REVIEWER_CALLS[@]}"
+    && pass "orchestrator was called after idle cycles (stuck state)" \
+    || fail "orchestrator was not called for stuck state"
+[[ "${#REVIEWER_CALLS[@]}" -ge 1 ]] \
+    && pass "at least 1 reviewer call (initial review)" \
+    || fail "expected at least 1 reviewer call, got ${#REVIEWER_CALLS[@]}"
 
 teardown_test
 trap - EXIT
@@ -179,6 +172,11 @@ push_file_to_repo "tasks/pending/002-build.md" "# Task 002" "pending"
 load_swarm
 setup_review_mocks
 
+ORCHESTRATOR_CALLS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("stuck")
+}
+
 REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
@@ -188,27 +186,20 @@ docker_run_reviewer() {
         rm -f "$MAIN_DIR/tasks/pending/002-build.md"
         mkdir -p "$MAIN_DIR/tasks/done"
         printf '# Task 002\n' > "$MAIN_DIR/tasks/done/002-build.md"
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    elif [[ "$1" == "002-build.md" ]]; then
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    elif [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        # Unexpected call (--stuck--) → still terminate
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
     fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
 
-# --stuck-- should NOT have been called since new work appeared
+# Orchestrator should NOT have been called since new work appeared
 found_stuck=false
-for call in "${REVIEWER_CALLS[@]+"${REVIEWER_CALLS[@]}"}"; do
-    [[ "$call" == "--stuck--" ]] && found_stuck=true && break
+for call in "${ORCHESTRATOR_CALLS[@]+"${ORCHESTRATOR_CALLS[@]}"}"; do
+    [[ "$call" == "stuck" ]] && found_stuck=true && break
 done
 [[ "$found_stuck" == "false" ]] \
-    && pass "--stuck-- not called when new work appeared" \
-    || fail "--stuck-- called despite new work appearing (counter did not reset)"
+    && pass "orchestrator not called when new work appeared (stuck counter reset)" \
+    || fail "orchestrator called despite new work appearing (counter did not reset)"
 
 # Final drain should have been called
 found_final=false
@@ -222,9 +213,9 @@ done
 teardown_test
 trap - EXIT
 
-# ─── Test 6: ALL_COMPLETE from blocked-task reviewer defers to final drain ────
+# ─── Test 6: Blocked task handled by orchestrator, then final drain fires ────
 
-setup_test "reviewer loop: ALL_COMPLETE from blocked-task reviewer defers to --final-- drain"
+setup_test "reviewer loop: blocked task handled by orchestrator, final drain still fires"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -234,34 +225,41 @@ push_file_to_repo "tasks/pending/BLOCKED-002-build.md" "# Task 002 blocked" "blo
 load_swarm
 setup_review_mocks
 
+ORCHESTRATOR_CALLS=()
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("blocked")
+    # Simulate orchestrator resolving the blocked task (moves it to done)
+    rm -f "$MAIN_DIR/tasks/pending/BLOCKED-002-build.md"
+    mkdir -p "$MAIN_DIR/tasks/done"
+    printf '# Task 002\n' > "$MAIN_DIR/tasks/done/002-build.md"
+}
+
 REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    elif [[ "$1" == "BLOCKED-002-build.md" ]]; then
-        # Blocked reviewer signals ALL_COMPLETE — should be ignored
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-        # Simulate the blocked task being resolved (moved to done)
-        rm -f "$MAIN_DIR/tasks/pending/BLOCKED-002-build.md"
-        mkdir -p "$MAIN_DIR/tasks/done"
-        printf '# Task 002\n' > "$MAIN_DIR/tasks/done/002-build.md"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
 
-# Verify --final-- drain was reached despite blocked reviewer signaling ALL_COMPLETE
+# Verify orchestrator was called for the blocked task
+found_blocked=false
+for call in "${ORCHESTRATOR_CALLS[@]+"${ORCHESTRATOR_CALLS[@]}"}"; do
+    [[ "$call" == "blocked" ]] && found_blocked=true && break
+done
+[[ "$found_blocked" == "true" ]] \
+    && pass "orchestrator called to handle blocked task" \
+    || fail "orchestrator not called for blocked task"
+
+# Verify --final-- drain was reached
 found_final=false
 for call in "${REVIEWER_CALLS[@]+"${REVIEWER_CALLS[@]}"}"; do
     [[ "$call" == "--final--" ]] && found_final=true && break
 done
 [[ "$found_final" == "true" ]] \
-    && pass "--final-- drain reached despite blocked reviewer signaling ALL_COMPLETE" \
-    || fail "--final-- drain not reached — blocked reviewer's ALL_COMPLETE short-circuited the loop"
+    && pass "--final-- drain reached after blocked task resolved" \
+    || fail "--final-- drain not reached"
 
 teardown_test
 trap - EXIT
@@ -286,11 +284,7 @@ REVIEWER_CALLS=()
 docker_run_reviewer() {
     REVIEWER_CALLS+=("$1")
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
@@ -347,6 +341,7 @@ docker_run_worker()              { :; }
 monitor_progress()               { :; }
 cleanup_docker()                 { :; }
 check_and_respawn_dead_workers() { :; }
+docker_run_orchestrator()        { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 

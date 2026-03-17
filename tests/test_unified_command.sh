@@ -22,7 +22,7 @@ setup_main_mocks() {
     docker_run_worker()          { :; }
     docker_run_reviewer()        {
         mkdir -p "$LOGS_DIR"
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     }
     run_with_review()            {
         RWR_CALLED=true; RWR_AGENTS="$1"

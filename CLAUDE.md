@@ -39,7 +39,7 @@ swarm-TIMESTAMP/
 
 **Phase 2 — Worker loop**: bash harness calls `claude` repeatedly per worker (stateless sessions). Each invocation: pulls, reads state, claims one task, does work, pushes, emits a signal word.
 
-**Phase 3 — Reviewer loop** (`run_with_review` mode): a reviewer agent runs after task completions, checks implementation against SPEC.md interfaces, runs the test suite (Python/Node/Go auto-detected), updates `CLAUDE.md` with new files/patterns, updates `## Relevant Files` on pending tasks, and adds fix tasks if tests fail. Signals `ALL_COMPLETE` only when pending is empty, active is empty, and tests pass.
+**Phase 3 — Reviewer loop** (`run_with_review` mode): a lightweight reviewer runs tests after each task completion and signals `TESTS_PASS` or `TESTS_FAIL`. If `TESTS_FAIL`, the orchestrator is triggered immediately to add fix tasks. Periodically (every N completions), the orchestrator also runs in augment mode alongside a specialist sweep to restructure pending tasks, fix stale manifests, and handle blocked tasks. Final drain: when pending and active are empty, a final test review confirms completion.
 
 **Task state machine**: `pending/NNN-task.md` → `active/worker-N--NNN-task.md` → `done/NNN-task.md`
 
@@ -64,10 +64,10 @@ swarm-TIMESTAMP/
 | `<promise>ALL_DONE</promise>` | Worker | No tasks remain, worker exits |
 | `<promise>NO_TASKS</promise>` | Worker | All tasks active, retry later |
 | `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator | Task files created |
-| `<promise>REVIEW_DONE</promise>` | Reviewer | Reviewed, work continues |
-| `<promise>ALL_COMPLETE</promise>` | Reviewer | Project done, tests passing |
+| `<promise>TESTS_PASS</promise>` | Reviewer | Tests passing |
+| `<promise>TESTS_FAIL</promise>` | Reviewer | Tests failing, orchestrator triggered |
 
-**Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness fires the reviewer with `--stuck--`. The reviewer diagnoses the deadlock (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
+**Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness triggers the orchestrator in augment mode. The orchestrator diagnoses deadlocks (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
 
 ## Docker Execution
 
@@ -82,13 +82,13 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 
 ## Key Design Decisions
 
-- **CLAUDE.md as project index**: orchestrator creates it; reviewer updates it after each task; workers get it auto-loaded by Claude Code. Kept under 200 lines. Orientation (structure, stack, build commands) lives here; contracts (interfaces, criteria) stay in SPEC.md
+- **CLAUDE.md as project index**: orchestrator creates it and updates it during periodic augment; workers get it auto-loaded by Claude Code. Kept under 200 lines. Orientation (structure, stack, build commands) lives here; contracts (interfaces, criteria) stay in SPEC.md
 - **Stateless invocations**: agents re-read `CLAUDE.md` (auto) + `SPEC.md` and task queue every call; state is only in git
 - **`.gitkeep` files**: keeps `tasks/active/` and `tasks/done/` tracked by git when empty
 - **`set -euo pipefail`**: use `var=$((var + 1))` not `((var++))`, use `if`/`then` not `[[ ]] && cmd`
 - **Rate-limit backoff**: workers detect rate-limit output from claude (429, "too many requests", "quota exceeded", account-level "hit your limit / resets UTC") and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`
 - **Real-time log streaming**: all roles use `tee -a "$log_file"` so claude output streams to log files line-by-line; `./swarm logs` wraps `tail -f` for convenience
-- **Periodic full reviews**: every N task completions (default 10, configurable via `QUIET_PERIOD_INTERVAL`), a full reviewer (`--full-review--` mode with restructuring powers) + specialist sweep run concurrently with workers. Between periodic reviews, per-task reviewers run in `quick` mode (tests only, no restructuring). Git conflicts between reviewers/specialists and workers are handled by normal rebase/retry
+- **Periodic orchestrator**: every N task completions (default 10, configurable via `RESTRUCTURE_INTERVAL`), the orchestrator runs in augment mode alongside a specialist sweep — reviews/fixes pending tasks, updates CLAUDE.md/SPEC.md, handles BLOCKED tasks, and adds tasks for test failures or gaps. Runs concurrently with workers; git conflicts handled by normal rebase/retry
 - **Parallel specialist sweeps**: all specialists in a sweep launch concurrently (background `&` + `wait`); each gets its own container/clone; push conflicts handled by rebase in specialist prompt
 - **Remote repo mirroring** (`--repo URL`): local bare repo stays the fast coordination hub; harness pushes to GitHub after each `sync_main`. When set, `PUBLIC_REPO=true` env var triggers a security notice in all agent prompts prohibiting secrets/PII commits
 
@@ -126,8 +126,8 @@ Tests mock the Claude CLI (no API tokens). E2E tests (`test_e2e.sh`) use a mock 
 
 Key test files:
 - `test_e2e.sh` — Full lifecycle, crash recovery, resume, specialist sweeps, rate limit, log streaming
-- `test_reviewer_loop.sh` — Review loop: ALL_COMPLETE deferral, stuck detection, blocked tasks, specialist parallel execution
-- `test_quiet_periods.sh` — Quiet period: pause/unpause, quick vs full review mode, configurable interval
+- `test_reviewer_loop.sh` — Review loop: TESTS_PASS/TESTS_FAIL signals, stuck detection via orchestrator, blocked task handling, specialist parallel execution
+- `test_quiet_periods.sh` — Periodic restructuring: orchestrator triggered at interval, RESTRUCTURE_INTERVAL configurable, TESTS_FAIL triggers orchestrator
 - `test_unified_command.sh` — New run vs resume detection, orchestrator augment, state restore
 
 ## Development Cleanup

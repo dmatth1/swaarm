@@ -54,13 +54,23 @@ Think through:
 If this is an augment (SPEC.md already exists, tasks already exist):
 
 1. Read `SPEC.md` fully — understand the current architecture, interfaces, and success criteria
-2. Read existing task files (`tasks/done/`, `tasks/pending/`) to understand what's been built and what's queued
+2. Read existing task files — scan `tasks/done/`, `tasks/pending/`, `tasks/active/`
 3. **Read the actual source code** — browse project files, tests, configs to understand current state
-4. **Update SPEC.md** — add new interfaces, update success criteria, adjust architecture if the new guidance requires it. Do not remove existing content unless it's being replaced.
-5. **Update CLAUDE.md** — add new modules, update build commands if changed. If `CLAUDE.md` doesn't exist, create it (see Step 3 for the template).
-6. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
-7. **Update PROGRESS.md** — add new tasks to the list
-8. Commit and push, then signal `ORCHESTRATION COMPLETE`
+4. **Run the test suite** — use standard detection (Python: `python -m pytest -x -q`, Node: `npm test`, Go: `go test ./...`). Note any failures — you will create fix tasks for them.
+5. **Handle BLOCKED tasks** — scan `tasks/pending/BLOCKED-*.md`. For each blocked task, read the file and its `## Blocker` section. Take the most appropriate action:
+   - **Break into subtasks** (preferred when too large/vague): create 2–3 smaller tasks with concrete acceptance criteria, then remove the BLOCKED file
+   - **Add hints and retry**: add a `## Hints` section with specific implementation guidance (file paths, function signatures, commands), then rename by stripping the `BLOCKED-` prefix
+   - **Escalate** (only when external information is genuinely required): move to `tasks/done/`, create a `NNN-clarification-needed.md` task
+6. **Review pending tasks** — for each file in `tasks/pending/`:
+   - Update `## Relevant Files` if completed tasks created/changed files the pending task needs
+   - Fix stale dependencies (tasks depending on tasks already in `tasks/done/`)
+   - Split tasks that are too large or have vague acceptance criteria
+   - Remove tasks that are now unnecessary
+7. **Update SPEC.md** — add new interfaces, update success criteria, adjust architecture if needed. Do not remove existing content unless replacing it.
+8. **Update CLAUDE.md** — add new modules, update build commands if changed. Keep under 200 lines.
+9. **Create new task files** starting at task number **{{NEXT_TASK_NUM}}** — do not use any lower number. Create tasks for: test failures found in step 4, integration gaps, new guidance in {{TASK}}, and any other missing work. Use the task file format from the **Task Creation Guide** (appended). Set dependencies on existing done tasks where the new work depends on them.
+10. **Update PROGRESS.md** — add new tasks to the list
+11. Commit and push, then signal `ORCHESTRATION COMPLETE`
 
 **Do not** re-create `001-project-setup.md` or `002-test-infrastructure.md` — those already exist. **Do** add a final `NNN-testing-and-verification.md` for the new work if it's substantial.
 

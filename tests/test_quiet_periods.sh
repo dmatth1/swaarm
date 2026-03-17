@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Tests for periodic full review + specialist sweep (every N completions, concurrent with workers).
+# Tests for periodic orchestrator + specialist sweep (every N completions, concurrent with workers).
 set -euo pipefail
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$TESTS_DIR/helpers.sh"
 
-# ─── Test 1: Full review + specialist sweep triggers after N completions ──────
+# ─── Test 1: Periodic orchestrator + specialist sweep triggers after N completions
 
-setup_test "periodic review: triggers after N completions (interval=3)"
+setup_test "periodic restructure: orchestrator + sweep trigger after N completions (interval=3)"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -27,36 +27,33 @@ check_and_respawn_dead_workers() { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 MAX_WORKER_ITERATIONS=5
-QUIET_PERIOD_INTERVAL=3
+RESTRUCTURE_INTERVAL=3
 
 SPECIALIST_SWEEPS=()
-REVIEWER_CALLS=()
+ORCHESTRATOR_CALLS=()
 
 run_specialist_sweep()  { SPECIALIST_SWEEPS+=("$1"); }
 
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS+=("periodic")
+    mkdir -p "$LOGS_DIR"
+}
+
 docker_run_reviewer() {
-    REVIEWER_CALLS+=("$1:${3:-full}")
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     fi
 }
 
 run_with_review 1
 
-# Check that a full review ran
-found_full_review=false
-for call in "${REVIEWER_CALLS[@]}"; do
-    if [[ "$call" == "--full-review--:full" ]]; then
-        found_full_review=true
-        break
-    fi
-done
-[[ "$found_full_review" == "true" ]] \
-    && pass "--full-review-- ran with mode=full" \
-    || fail "no --full-review-- call found (calls: ${REVIEWER_CALLS[*]})"
+# Check that a periodic orchestrator ran
+[[ "${#ORCHESTRATOR_CALLS[@]}" -ge 1 ]] \
+    && pass "periodic orchestrator ran at completion threshold" \
+    || fail "no periodic orchestrator call (calls: ${#ORCHESTRATOR_CALLS[@]})"
 
 # Check specialist sweep ran
 found_sweep=false
@@ -73,9 +70,9 @@ done
 teardown_test
 trap - EXIT
 
-# ─── Test 2: Quick mode used for per-task reviews ─────────────────────────────
+# ─── Test 2: Per-task reviewer called without mode arg ───────────────────────
 
-setup_test "periodic review: per-task reviews use quick mode"
+setup_test "periodic restructure: per-task reviewer called without REVIEW_MODE"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -90,33 +87,34 @@ check_and_respawn_dead_workers() { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 run_specialist_sweep()           { :; }
+docker_run_orchestrator()        { :; }
 MAX_WORKER_ITERATIONS=5
-QUIET_PERIOD_INTERVAL=999  # no periodic review
+RESTRUCTURE_INTERVAL=999  # no periodic orchestrator
 
-REVIEWER_MODES=()
+REVIEWER_ARG_COUNTS=()
 docker_run_reviewer() {
-    REVIEWER_MODES+=("$1:${3:-unset}")
+    REVIEWER_ARG_COUNTS+=("$#")
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     fi
 }
 
 run_with_review 1
 
-# First call should be quick (per-task), final should be full (drain)
-[[ "${REVIEWER_MODES[0]}" == "001-setup.md:quick" ]] \
-    && pass "per-task review uses quick mode" \
-    || fail "expected quick mode, got: ${REVIEWER_MODES[0]}"
+# Per-task reviewer should be called with 2 args (task_name, review_num) — no mode arg
+[[ "${REVIEWER_ARG_COUNTS[0]}" -eq 2 ]] \
+    && pass "per-task reviewer called with 2 args (no REVIEW_MODE)" \
+    || fail "expected 2 args, got: ${REVIEWER_ARG_COUNTS[0]:-unset}"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 3: No periodic review before threshold ─────────────────────────────
+# ─── Test 3: No periodic orchestrator below threshold ─────────────────────────
 
-setup_test "periodic review: does not trigger below threshold"
+setup_test "periodic restructure: does not trigger below threshold"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -133,37 +131,42 @@ sleep()                          { :; }
 sync_main()                      { :; }
 run_specialist_sweep()           { :; }
 MAX_WORKER_ITERATIONS=5
-QUIET_PERIOD_INTERVAL=5  # threshold is 5, only 2 done
+RESTRUCTURE_INTERVAL=5  # threshold is 5, only 2 done
 
-FULL_REVIEW_CALLS=0
+PERIODIC_ORCHESTRATOR_CALLS=0
+docker_run_orchestrator() {
+    # Only count calls with a next_task_num arg (periodic/stuck/blocked — not test-fail-triggered)
+    PERIODIC_ORCHESTRATOR_CALLS=$((PERIODIC_ORCHESTRATOR_CALLS + 1))
+    mkdir -p "$LOGS_DIR"
+}
+
 docker_run_reviewer() {
-    if [[ "$1" == "--full-review--" ]]; then
-        FULL_REVIEW_CALLS=$((FULL_REVIEW_CALLS + 1))
-    fi
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     fi
 }
 
 run_with_review 1
 
-[[ "$FULL_REVIEW_CALLS" -eq 0 ]] \
-    && pass "no periodic full review triggered (2 done < threshold 5)" \
-    || fail "periodic review triggered too early ($FULL_REVIEW_CALLS calls)"
+# Orchestrator should not have been called for periodic restructuring (only final drain path)
+# The final drain doesn't call orchestrator (it calls reviewer which says TESTS_PASS)
+[[ "$PERIODIC_ORCHESTRATOR_CALLS" -eq 0 ]] \
+    && pass "no periodic orchestrator triggered (2 done < threshold 5)" \
+    || fail "orchestrator triggered too early ($PERIODIC_ORCHESTRATOR_CALLS calls)"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 4: Interval is configurable ────────────────────────────────────────
+# ─── Test 4: RESTRUCTURE_INTERVAL is configurable ────────────────────────────
 
-setup_test "periodic review: QUIET_PERIOD_INTERVAL is configurable"
+setup_test "periodic restructure: RESTRUCTURE_INTERVAL is configurable"
 trap teardown_test EXIT
 
 init_test_workspace
-# 5 done tasks + threshold of 5 = exactly hits periodic review
+# 5 done tasks + threshold of 5 = exactly hits periodic orchestrator
 for i in $(seq 1 5); do
     push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
 done
@@ -178,39 +181,37 @@ sleep()                          { :; }
 sync_main()                      { :; }
 run_specialist_sweep()           { :; }
 MAX_WORKER_ITERATIONS=5
-QUIET_PERIOD_INTERVAL=5
+RESTRUCTURE_INTERVAL=5
 
-FULL_REVIEW_CALLS=0
-docker_run_reviewer() {
-    if [[ "$1" == "--full-review--" ]]; then
-        FULL_REVIEW_CALLS=$((FULL_REVIEW_CALLS + 1))
-    fi
+PERIODIC_CALLS=0
+LAST_PERIODIC_ARG=""
+docker_run_orchestrator() {
+    PERIODIC_CALLS=$((PERIODIC_CALLS + 1))
+    LAST_PERIODIC_ARG="${1:-}"
     mkdir -p "$LOGS_DIR"
-    if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
-    else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
-    fi
+}
+
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
 }
 
 run_with_review 1
 
-[[ "$FULL_REVIEW_CALLS" -ge 1 ]] \
-    && pass "periodic review triggered at custom interval (5)" \
-    || fail "periodic review not triggered at interval=5 with 5 done tasks"
+[[ "$PERIODIC_CALLS" -ge 1 ]] \
+    && pass "periodic orchestrator triggered at custom interval (5)" \
+    || fail "periodic orchestrator not triggered at interval=5 with 5 done tasks"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 5: Full review mode used during periodic review ────────────────────
+# ─── Test 5: TESTS_FAIL triggers orchestrator immediately ─────────────────────
 
-setup_test "periodic review: full review has restructuring powers"
+setup_test "periodic restructure: TESTS_FAIL from reviewer triggers orchestrator immediately"
 trap teardown_test EXIT
 
 init_test_workspace
-for i in $(seq 1 10); do
-    push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
-done
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done"
 
 load_swarm
 
@@ -221,79 +222,73 @@ check_and_respawn_dead_workers() { :; }
 sleep()                          { :; }
 sync_main()                      { :; }
 run_specialist_sweep()           { :; }
-MAX_WORKER_ITERATIONS=20
-QUIET_PERIOD_INTERVAL=10
+MAX_WORKER_ITERATIONS=5
+RESTRUCTURE_INTERVAL=999
 
-FULL_REVIEW_TASKS=()
+ORCHESTRATOR_CALL_COUNT=0
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALL_COUNT=$((ORCHESTRATOR_CALL_COUNT + 1))
+    mkdir -p "$LOGS_DIR"
+}
+
+REVIEWER_CALL_NUM=0
 docker_run_reviewer() {
-    if [[ "${3:-}" == "full" && "$1" != "--final--" ]]; then
-        FULL_REVIEW_TASKS+=("$1")
-    fi
+    REVIEWER_CALL_NUM=$((REVIEWER_CALL_NUM + 1))
     mkdir -p "$LOGS_DIR"
     if [[ "$1" == "--final--" ]]; then
-        echo "ALL_COMPLETE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    elif [[ "$REVIEWER_CALL_NUM" -eq 1 ]]; then
+        # First per-task review: fail tests
+        echo "TESTS_FAIL" > "$LOGS_DIR/reviewer-$2.log"
     else
-        echo "REVIEW_DONE" > "$LOGS_DIR/reviewer-$2.log"
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
     fi
 }
 
 run_with_review 1
 
-[[ "${#FULL_REVIEW_TASKS[@]}" -ge 1 ]] \
-    && pass "full review ran during periodic review" \
-    || fail "no full review during periodic review"
-
-if [[ "${#FULL_REVIEW_TASKS[@]}" -ge 1 ]]; then
-    [[ "${FULL_REVIEW_TASKS[0]}" == "--full-review--" ]] \
-        && pass "full review received --full-review-- as COMPLETED_TASK" \
-        || fail "expected --full-review--, got: ${FULL_REVIEW_TASKS[0]}"
-else
-    fail "no full review task to check COMPLETED_TASK value"
-fi
+[[ "$ORCHESTRATOR_CALL_COUNT" -ge 1 ]] \
+    && pass "orchestrator triggered after TESTS_FAIL" \
+    || fail "orchestrator not triggered after TESTS_FAIL"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 6: REVIEW_MODE passed through entrypoint ────────────────────────────
+# ─── Test 6: Reviewer prompt has no REVIEW_MODE ───────────────────────────────
 
-setup_test "periodic review: REVIEW_MODE substituted in reviewer prompt"
-trap teardown_test EXIT
-
-ENTRYPOINT="$TESTS_DIR/../docker/entrypoint.sh"
-
-# Verify the entrypoint substitutes REVIEW_MODE
-grep -q 'REVIEW_MODE' "$ENTRYPOINT" \
-    && pass "entrypoint reads REVIEW_MODE env var" \
-    || fail "entrypoint missing REVIEW_MODE"
-
-grep -q '{{REVIEW_MODE}}' "$TESTS_DIR/../prompts/reviewer.md" \
-    && pass "reviewer prompt has {{REVIEW_MODE}} placeholder" \
-    || fail "reviewer prompt missing {{REVIEW_MODE}} placeholder"
-
-teardown_test
-trap - EXIT
-
-# ─── Test 7: Reviewer prompt has --full-review-- handling ─────────────────────
-
-setup_test "periodic review: reviewer prompt handles --full-review--"
+setup_test "periodic restructure: reviewer prompt has no REVIEW_MODE placeholder"
 trap teardown_test EXIT
 
 REVIEWER_PROMPT="$TESTS_DIR/../prompts/reviewer.md"
 
-grep -q '\-\-full-review\-\-' "$REVIEWER_PROMPT" \
-    && pass "reviewer prompt documents --full-review--" \
-    || fail "reviewer prompt missing --full-review-- handling"
+grep -q 'REVIEW_MODE' "$REVIEWER_PROMPT" \
+    && fail "reviewer prompt still references REVIEW_MODE (should be removed)" \
+    || pass "reviewer prompt has no REVIEW_MODE placeholder"
 
-grep -q 'quick' "$REVIEWER_PROMPT" \
-    && pass "reviewer prompt documents quick mode" \
-    || fail "reviewer prompt missing quick mode docs"
+grep -q 'TESTS_PASS\|TESTS_FAIL' "$REVIEWER_PROMPT" \
+    && pass "reviewer prompt uses TESTS_PASS/TESTS_FAIL signals" \
+    || fail "reviewer prompt missing TESTS_PASS/TESTS_FAIL signals"
 
 teardown_test
 trap - EXIT
 
-# ─── Test 8: docker_run_reviewer passes REVIEW_MODE ──────────────────────────
+# ─── Test 7: Entrypoint has no REVIEW_MODE ────────────────────────────────────
 
-setup_test "periodic review: docker_run_reviewer passes REVIEW_MODE env var"
+setup_test "periodic restructure: entrypoint does not pass REVIEW_MODE"
+trap teardown_test EXIT
+
+ENTRYPOINT="$TESTS_DIR/../docker/entrypoint.sh"
+
+grep -q 'REVIEW_MODE' "$ENTRYPOINT" \
+    && fail "entrypoint still references REVIEW_MODE (should be removed)" \
+    || pass "entrypoint has no REVIEW_MODE"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 8: docker_run_reviewer takes 2 args (no mode) ──────────────────────
+
+setup_test "periodic restructure: docker_run_reviewer takes 2 args (not 3)"
 trap teardown_test EXIT
 
 init_test_workspace
@@ -307,18 +302,16 @@ docker() {
 }
 get_claude_oauth_token() { echo "test-token"; }
 
-docker_run_reviewer "001-setup.md" "1" "quick" 2>/dev/null || true
+docker_run_reviewer "001-setup.md" "1" 2>/dev/null || true
 
-echo "$DOCKER_ARGS" | grep -q 'REVIEW_MODE=quick' \
-    && pass "docker_run_reviewer passes REVIEW_MODE=quick" \
-    || fail "REVIEW_MODE not in docker args: $DOCKER_ARGS"
+echo "$DOCKER_ARGS" | grep -q 'REVIEW_MODE' \
+    && fail "docker_run_reviewer still passes REVIEW_MODE" \
+    || pass "docker_run_reviewer does not pass REVIEW_MODE"
 
-DOCKER_ARGS=""
-docker_run_reviewer "002-build.md" "2" "full" 2>/dev/null || true
-
-echo "$DOCKER_ARGS" | grep -q 'REVIEW_MODE=full' \
-    && pass "docker_run_reviewer passes REVIEW_MODE=full" \
-    || fail "REVIEW_MODE not in docker args: $DOCKER_ARGS"
+# Verify COMPLETED_TASK is still passed
+echo "$DOCKER_ARGS" | grep -q 'COMPLETED_TASK=001-setup.md' \
+    && pass "docker_run_reviewer still passes COMPLETED_TASK" \
+    || fail "COMPLETED_TASK not in docker args: $DOCKER_ARGS"
 
 teardown_test
 trap - EXIT
