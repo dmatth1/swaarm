@@ -31,15 +31,6 @@ The reviewer checks if code compiles and unit tests pass, but does not verify th
 - [ ] If required artifacts are missing, reviewer should create a fix task or reject the completion
 - [ ] Add test to `tests/test_reviewer_loop.sh` covering artifact compliance check
 
-### Quiet periods for reviewer/specialist sweeps
-Workers currently run continuously while reviewers and specialists push changes in parallel — causing merge conflicts, stale interfaces, and wasted work. Implement periodic "quiet periods" where workers drain, then reviewer + specialists get exclusive access to restructure the plan.
-- [ ] After every N task completions (configurable, default 3-5), stop workers from claiming new tasks
-- [ ] Wait for all active tasks to drain (no active workers)
-- [ ] Run full reviewer with restructuring powers (split tasks, reorder deps, rewrite task descriptions, update manifests)
-- [ ] Run specialist sweep during quiet period
-- [ ] Restart workers after quiet period completes
-- [ ] Split reviewer into two modes: "quick check" (parallel, after each task — just runs tests) and "full review" (exclusive, during quiet periods — can restructure)
-- [ ] Idle workers cost nothing in API tokens, so throughput loss is wall-clock only
 
 ## P2 — Should fix
 
@@ -117,3 +108,13 @@ All logging is line-based text. Machine-readable events would enable automation 
 ### Octal parsing bug with zero-padded task numbers
 - [x] Audited all 3 `grep -o '^[0-9]*'` → `[[ ]]` patterns — all use `$((10#$num))`
 - [x] Test: `tests/test_inject.sh` test 5 covers task numbers 008, 009, 018, 019
+
+### Quiet periods for reviewer/specialist sweeps
+- [x] Every N completions (default 10, `QUIET_PERIOD_INTERVAL`), pause workers via `docker pause`
+- [x] `wait_for_active_drain()` waits up to 10m for active tasks to complete
+- [x] Full reviewer (`--full-review--` mode) runs with restructuring powers during quiet period
+- [x] Specialist sweep runs during quiet period (exclusive repo access)
+- [x] Workers resume via `docker unpause` after quiet period
+- [x] Per-task reviews use `quick` mode (tests only, skip CLAUDE.md/manifest updates and task restructuring)
+- [x] Reviewer prompt supports `{{REVIEW_MODE}}` (quick/full) and `--full-review--` COMPLETED_TASK
+- [x] Tests: `tests/test_quiet_periods.sh` (16 tests)

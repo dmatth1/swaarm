@@ -656,6 +656,7 @@ docker_run_worker() {
 docker_run_reviewer() {
     local task_name="$1"
     local review_num="$2"
+    local review_mode="${3:-full}"
     local container_name="swarm-${RUN_ID}-reviewer-${review_num}"
 
     local oauth_token
@@ -673,6 +674,7 @@ docker_run_reviewer() {
         ${oauth_token:+-e CLAUDE_CODE_OAUTH_TOKEN="$oauth_token"} \
         -e COMPLETED_TASK="$task_name" \
         -e REVIEW_NUM="$review_num" \
+        -e REVIEW_MODE="$review_mode" \
         -e VERBOSE="$VERBOSE" \
         ${MODEL:+-e MODEL="$MODEL"} \
         ${REMOTE_REPO:+-e PUBLIC_REPO=true} \
@@ -759,6 +761,48 @@ run_specialist_sweep() {
     done
 
     sync_main
+}
+
+pause_workers() {
+    local agents="$1"
+    log "Pausing $agents worker(s) for quiet period..."
+    local i
+    for i in $(seq 1 "$agents"); do
+        local cid_file="$OUTPUT_DIR/pids/worker-${i}.cid"
+        [[ -f "$cid_file" ]] || continue
+        local cname
+        cname=$(cat "$cid_file" 2>/dev/null) || continue
+        [[ -z "$cname" ]] && continue
+        docker pause "$cname" 2>/dev/null || true
+    done
+}
+
+unpause_workers() {
+    local agents="$1"
+    log "Resuming $agents worker(s) after quiet period..."
+    local i
+    for i in $(seq 1 "$agents"); do
+        local cid_file="$OUTPUT_DIR/pids/worker-${i}.cid"
+        [[ -f "$cid_file" ]] || continue
+        local cname
+        cname=$(cat "$cid_file" 2>/dev/null) || continue
+        [[ -z "$cname" ]] && continue
+        docker unpause "$cname" 2>/dev/null || true
+    done
+}
+
+wait_for_active_drain() {
+    local max_wait=600
+    local waited=0
+    while [[ "$(active_count)" -gt 0 && "$waited" -lt "$max_wait" ]]; do
+        sleep 5
+        sync_main
+        waited=$((waited + 5))
+        log "Quiet period: waiting for active tasks to drain ($(active_count) remaining, ${waited}s elapsed)"
+    done
+    if [[ "$(active_count)" -gt 0 ]]; then
+        warn "Quiet period: active tasks did not drain after ${max_wait}s — proceeding anyway"
+    fi
 }
 
 check_and_respawn_dead_workers() {
@@ -848,8 +892,8 @@ run_with_review() {
     local all_complete=false
     local stuck_cycles=0
     local max_stuck_cycles=3
-    local last_specialist_sweep=0
-    local specialist_interval="${SPECIALIST_INTERVAL:-5}"
+    local last_quiet_period_at=0
+    local quiet_period_interval="${QUIET_PERIOD_INTERVAL:-10}"
 
     while [[ "$all_complete" == "false" ]]; do
         sleep 5
@@ -887,8 +931,8 @@ run_with_review() {
                 break
             fi
 
-            log "Running reviewer ${review_count} for: $task_name"
-            docker_run_reviewer "$task_name" "$review_count"
+            log "Running quick reviewer ${review_count} for: $task_name"
+            docker_run_reviewer "$task_name" "$review_count" "quick"
             reviewed+=("$task_name")
 
             # Ignore ALL_COMPLETE from regular task reviewers — only the final
@@ -920,8 +964,8 @@ run_with_review() {
                     break
                 fi
 
-                log "Running reviewer ${review_count} for blocked task: $task_name"
-                docker_run_reviewer "$task_name" "$review_count"
+                log "Running quick reviewer ${review_count} for blocked task: $task_name"
+                docker_run_reviewer "$task_name" "$review_count" "quick"
                 blocked_reviewed+=("$task_name")
 
                 # Ignore ALL_COMPLETE from blocked-task reviewers — defer to final drain.
@@ -931,13 +975,26 @@ run_with_review() {
             done
         fi
 
-        # Run specialist sweep every N task completions
+        # Quiet period: every N completions, pause workers, drain, full review + specialists
         if [[ "$all_complete" == "false" ]]; then
             local current_done
             current_done=$(done_count)
-            if [[ "$current_done" -ge $(( last_specialist_sweep + specialist_interval )) ]]; then
-                last_specialist_sweep="$current_done"
-                run_specialist_sweep "after ${current_done} tasks"
+            if [[ "$current_done" -ge $(( last_quiet_period_at + quiet_period_interval )) && "$current_done" -gt 0 ]]; then
+                last_quiet_period_at="$current_done"
+                log "=== Entering quiet period at $current_done tasks ==="
+
+                pause_workers "$agents"
+                wait_for_active_drain
+                sync_main
+
+                review_count=$((review_count + 1))
+                log "Running full review during quiet period (${review_count})..."
+                docker_run_reviewer "--full-review--" "$review_count" "full"
+
+                run_specialist_sweep "quiet-period at ${current_done} tasks"
+
+                unpause_workers "$agents"
+                log "=== Quiet period complete, workers resumed ==="
             fi
         fi
 

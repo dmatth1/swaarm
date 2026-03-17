@@ -87,6 +87,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 - **`set -euo pipefail`**: use `var=$((var + 1))` not `((var++))`, use `if`/`then` not `[[ ]] && cmd`
 - **Rate-limit backoff**: workers detect rate-limit output from claude (429, "too many requests", "quota exceeded", account-level "hit your limit / resets UTC") and sleep with exponential backoff (5m→15m→30m→1hr→2hr→4hr ±20% jitter) without releasing their claimed task; backoff retries don't count against `MAX_WORKER_ITERATIONS`
 - **Real-time log streaming**: all roles use `tee -a "$log_file"` so claude output streams to log files line-by-line; `./swarm logs` wraps `tail -f` for convenience
+- **Quiet periods**: every N task completions (default 10, configurable via `QUIET_PERIOD_INTERVAL`), workers are paused via `docker pause`, active tasks drain, then a full reviewer (`--full-review--` mode with restructuring powers) + specialist sweep run with exclusive repo access. Between quiet periods, per-task reviewers run in `quick` mode (tests only, no restructuring). Workers resume after the quiet period
 - **Parallel specialist sweeps**: all specialists in a sweep launch concurrently (background `&` + `wait`); each gets its own container/clone; push conflicts handled by rebase in specialist prompt
 - **Remote repo mirroring** (`--repo URL`): local bare repo stays the fast coordination hub; harness pushes to GitHub after each `sync_main`. When set, `PUBLIC_REPO=true` env var triggers a security notice in all agent prompts prohibiting secrets/PII commits
 

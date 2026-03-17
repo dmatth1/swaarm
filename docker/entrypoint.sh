@@ -169,10 +169,12 @@ run_reviewer() {
     git config user.email "reviewer@swarm"
     git config user.name "Swarm Reviewer"
 
-    # Prepare prompt — substitute COMPLETED_TASK and REVIEW_NUM
+    # Prepare prompt — substitute COMPLETED_TASK, REVIEW_NUM, and REVIEW_MODE
+    local review_mode="${REVIEW_MODE:-full}"
     local prompt
     prompt=$(sed -e "s|{{COMPLETED_TASK}}|${completed_task}|g" \
                  -e "s|{{REVIEW_NUM}}|${review_num}|g" \
+                 -e "s|{{REVIEW_MODE}}|${review_mode}|g" \
                  /prompts/reviewer.md)
 
     # Append shared task creation guide
