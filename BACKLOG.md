@@ -22,6 +22,14 @@ When workers hit repeated 529 (overloaded) errors, they currently just backoff a
 - [ ] Make fallback chain configurable (e.g. `--fallback-model sonnet`)
 - [ ] Consider harness-level detection: if all workers are 529-looping, kill and resume with fallback
 
+### CID file written before container actually starts
+`docker run -d` returns immediately. If the container fails to start (bad image, OOM), the `.cid` file already points to a dead container. Next cycle, `check_and_respawn_dead_workers` may unstick tasks unnecessarily.
+- [ ] Verify container is running after `docker run -d` before writing `.cid`
+
+### Specialist failures silently ignored
+Background `&` + `wait || true` in `run_specialist_sweep` — if a specialist crashes or fails to push, nobody knows.
+- [ ] Capture exit codes from `wait`, log warnings on failure
+
 ### cmd_kill has no tests
 `cmd_kill` (swarm:220) is completely untested. Covers: kill specific worker by ID, kill all workers, missing pids dir error, docker stop/rm failures.
 - [ ] Add `tests/test_kill.sh`
