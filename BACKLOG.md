@@ -78,6 +78,7 @@ All logging is line-based text. Machine-readable events would enable automation 
 - [x] `run_claude()` uses `claude -p --output-format stream-json --include-partial-messages` — tokens stream as they arrive, no PTY needed
 - [x] `docker/stream_parse.py` parses the JSON stream: `content_block_delta` → log in real-time; `result` text → `CLAUDE_OUTPUT_FILE` for signal grep
 - [x] Works cross-platform (macOS + Linux) — no `script` needed, no platform branching
+- [x] Validated in real swarm run: byte count grows continuously mid-invocation; silence only during tool execution (expected — no text tokens)
 - [x] `./swarm logs <output-dir> [worker-N]` subcommand added (wraps `tail -f`)
 - [x] Tests: `tests/test_log_streaming.sh` (12 tests), `tests/test_logs.sh` (6 tests)
 
