@@ -16,10 +16,6 @@ Workers backoff and retry the same model indefinitely on 529. Should detect sust
 `run_specialist_sweep` uses `&` + `wait || true` — crashed specialists are invisible.
 - [ ] Capture exit codes from `wait`, log warnings on failure
 
-### cmd_kill has no tests
-Completely untested. Covers: kill by ID, kill all, missing pids dir, docker stop/rm failures.
-- [ ] Add `tests/test_kill.sh`
-
 ## P3 — Later (cloud prep)
 
 ### Cost/token tracking
@@ -41,6 +37,6 @@ Review loop runs indefinitely. No safety valve.
 - [ ] Add optional `--timeout` flag for max wall-clock time
 
 ### Parallelize Docker-dependent tests
-`test_cleanup.sh` and `test_dead_worker.sh` run sequentially (shared container namespaces).
+`test_cleanup.sh`, `test_dead_worker.sh`, and `test_kill.sh` run sequentially (shared container namespaces).
 - [ ] Unique container name prefixes per test suite
 - [ ] Remove sequential exception from `run_tests.sh`
