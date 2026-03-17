@@ -129,7 +129,10 @@ git push origin main
 
 **If existing tests fail**, fix the regression before continuing — do not leave other agents building on broken code.
 
-**If you need to install dependencies**, do it. If there's a `package.json`, `requirements.txt`, `go.mod`, etc., use it.
+**If you need to install dependencies**, do it — don't skip work or create placeholders because a tool is missing.
+- Language deps: `pip install`, `npm install`, `go mod download`, etc.
+- System packages: `sudo apt-get update && sudo apt-get install -y <package>` (you have passwordless sudo)
+- Examples: `xvfb` for headless rendering, `imagemagick` for image processing, `cmake` for C++ builds, `libssl-dev` for TLS
 
 ### Step 9: Run the Full Test Suite
 
