@@ -15,7 +15,7 @@ echo -e "${CYAN}${BOLD}swarm integration tests (parallel)${NC}"
 echo -e "${CYAN}$(printf '─%.0s' {1..40})${NC}"
 
 # Docker-dependent tests run sequentially to avoid container name conflicts
-DOCKER_TESTS="test_cleanup test_dead_worker"
+DOCKER_TESTS="test_cleanup test_dead_worker test_kill"
 
 RESULTS_DIR=$(mktemp -d)
 PIDS=()

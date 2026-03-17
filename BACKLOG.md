@@ -30,9 +30,9 @@ When workers hit repeated 529 (overloaded) errors, they currently just backoff a
 Background `&` + `wait || true` in `run_specialist_sweep` — if a specialist crashes or fails to push, nobody knows.
 - [ ] Capture exit codes from `wait`, log warnings on failure
 
-### cmd_kill has no tests
-`cmd_kill` (swarm:220) is completely untested. Covers: kill specific worker by ID, kill all workers, missing pids dir error, docker stop/rm failures.
-- [ ] Add `tests/test_kill.sh`
+### cmd_kill has no tests — **Fixed**
+- [x] Added `tests/test_kill.sh` (6 tests, 13 assertions)
+- [x] Covers: kill specific worker, kill all workers, missing pids dir, missing worker, ghost container, no output dir
 
 ## P3 — Later (cloud prep)
 
