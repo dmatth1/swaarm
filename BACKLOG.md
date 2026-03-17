@@ -135,5 +135,5 @@ All logging is line-based text. Machine-readable events would enable automation 
 
 ### E2E integration test
 - [x] Mock claude does real git operations (claim, complete, push) without API tokens
-- [x] 10 scenarios: full lifecycle, git conflict resolution, crash recovery, orchestrator augment, log streaming, review loop, rate limit backoff, task ordering, resume, specialist sweep
-- [x] Tests: `tests/test_e2e.sh` (10 tests)
+- [x] 10 scenarios (32 assertions): full lifecycle, crash recovery, log streaming, rate limit, task ordering, resume without prompt, resume with prompt (orchestrator augment + post-augment sweep), specialist parsing, pre-flight sweep, quiet period sweep
+- [x] Tests: `tests/test_e2e.sh` (32 tests)

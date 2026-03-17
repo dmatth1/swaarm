@@ -118,7 +118,19 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 | Workers sleeping, no progress | Rate limit hit | Automatic — workers back off and retry; or `./swarm -o <dir>` to restart manually |
 | Orphaned containers | EXIT trap missed | `docker ps -a --filter name=swarm-` |
 
-## Testing and Development Cleanup
+## Testing
+
+Run all tests: `for f in tests/test_*.sh; do bash "$f"; done`
+
+Tests mock the Claude CLI (no API tokens). E2E tests (`test_e2e.sh`) use a mock claude that performs real git operations (claim tasks, create files, push commits). All other tests mock at the harness level (override `docker_run_*` functions via `load_swarm`).
+
+Key test files:
+- `test_e2e.sh` — Full lifecycle, crash recovery, resume, specialist sweeps, rate limit, log streaming
+- `test_reviewer_loop.sh` — Review loop: ALL_COMPLETE deferral, stuck detection, blocked tasks, specialist parallel execution
+- `test_quiet_periods.sh` — Quiet period: pause/unpause, quick vs full review mode, configurable interval
+- `test_unified_command.sh` — New run vs resume detection, orchestrator augment, state restore
+
+## Development Cleanup
 
 When Claude runs `./swarm` during feature development or testing, use `--output swarm-dev-TIMESTAMP` to mark it as dev-generated.
 
