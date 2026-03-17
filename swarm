@@ -384,7 +384,7 @@ cmd_resume() {
             git commit -m "resume: return stuck tasks to pending" -q
             git push origin main -q
         fi
-    )
+    ) || warn "Failed to unstick tasks in temp clone"
     rm -rf "$unstick_dir"
 
     # Sync main view
@@ -720,7 +720,7 @@ check_and_respawn_dead_workers() {
                     git commit -m "harness: unstick worker-${i} tasks after crash" -q
                     git push origin main -q
                 fi
-            )
+            ) || warn "Failed to unstick worker-${i} tasks in temp clone"
             rm -rf "$tmp"
             sync_main
         fi
@@ -1038,7 +1038,7 @@ PROGEOF
         git add -A
         git commit -m "init: workspace bootstrap" -q
         git push origin main -q
-    )
+    ) || warn "Failed to bootstrap workspace in temp clone"
 
     rm -rf "$bootstrap_dir"
 
@@ -1169,7 +1169,7 @@ main() {
                 git commit -m "resume: return stuck tasks to pending" -q
                 git push origin main -q
             fi
-        )
+        ) || warn "Failed to unstick tasks in temp clone"
         rm -rf "$unstick_dir"
 
         # Sync main view
