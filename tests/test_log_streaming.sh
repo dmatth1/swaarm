@@ -224,4 +224,83 @@ fi
 teardown_test
 trap - EXIT
 
+# ─── Test: Log truncation caps file size ──────────────────────────────────────
+
+setup_test "log streaming: truncate_log caps log file at MAX_LOG_SIZE"
+trap teardown_test EXIT
+
+init_streaming_workspace
+
+# Extract and define just the truncate_log function (sourcing full entrypoint triggers exit 1)
+eval "$(sed -n '/^truncate_log()/,/^}/p' "$ENTRYPOINT")"
+
+# Create a 500-byte log file
+log_file="$TEST_LOGS/truncation-test.log"
+python3 -c "print('A' * 500)" > "$log_file"
+original_size=$(wc -c < "$log_file" | tr -d ' ')
+
+# Truncate at 200 bytes
+MAX_LOG_SIZE=200
+truncate_log "$log_file"
+new_size=$(wc -c < "$log_file" | tr -d ' ')
+
+[[ "$new_size" -le 300 ]] \
+    && pass "log truncated from ${original_size} to ${new_size} bytes (limit 200+marker)" \
+    || fail "log not truncated: still ${new_size} bytes (expected ~270)"
+
+grep -q "log truncated" "$log_file" \
+    && pass "truncation marker present in log" \
+    || fail "truncation marker missing"
+
+teardown_test
+trap - EXIT
+
+# ─── Test: Log truncation skipped when under limit ────────────────────────────
+
+setup_test "log streaming: truncate_log skips files under MAX_LOG_SIZE"
+trap teardown_test EXIT
+
+init_streaming_workspace
+
+eval "$(sed -n '/^truncate_log()/,/^}/p' "$ENTRYPOINT")"
+
+log_file="$TEST_LOGS/small-log.log"
+echo "small log" > "$log_file"
+original_size=$(wc -c < "$log_file" | tr -d ' ')
+
+MAX_LOG_SIZE=10485760
+truncate_log "$log_file"
+new_size=$(wc -c < "$log_file" | tr -d ' ')
+
+[[ "$new_size" -eq "$original_size" ]] \
+    && pass "small log untouched (${new_size} bytes)" \
+    || fail "small log was modified: ${original_size} → ${new_size}"
+
+teardown_test
+trap - EXIT
+
+# ─── Test: Log truncation disabled with MAX_LOG_SIZE=0 ────────────────────────
+
+setup_test "log streaming: truncate_log disabled when MAX_LOG_SIZE=0"
+trap teardown_test EXIT
+
+init_streaming_workspace
+
+eval "$(sed -n '/^truncate_log()/,/^}/p' "$ENTRYPOINT")"
+
+log_file="$TEST_LOGS/no-truncate.log"
+python3 -c "print('B' * 500)" > "$log_file"
+original_size=$(wc -c < "$log_file" | tr -d ' ')
+
+MAX_LOG_SIZE=0
+truncate_log "$log_file"
+new_size=$(wc -c < "$log_file" | tr -d ' ')
+
+[[ "$new_size" -eq "$original_size" ]] \
+    && pass "log untouched when MAX_LOG_SIZE=0 (${new_size} bytes)" \
+    || fail "log was truncated despite MAX_LOG_SIZE=0: ${original_size} → ${new_size}"
+
+teardown_test
+trap - EXIT
+
 print_summary

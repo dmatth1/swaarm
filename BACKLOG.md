@@ -50,8 +50,11 @@ All git and claude CLI calls have no timeout. A hung network connection blocks t
 - [ ] Add timeout on claude CLI invocations (configurable, default 5m)
 
 ### Log rotation
-Worker logs append indefinitely with no rotation. Long runs on a server can fill disk.
-- [ ] Implement log rotation or size cap per worker log
+- [x] `truncate_log()` in `docker/entrypoint.sh` caps log files after each `run_claude()` call
+- [x] Default 10MB cap (`MAX_LOG_SIZE=10485760`); set `MAX_LOG_SIZE=0` to disable
+- [x] Truncation keeps the tail (most recent output), prepends a `[log truncated...]` marker
+- [x] Cross-platform: `stat -f%z` (macOS) / `stat -c%s` (Linux) with `|| echo 0` fallback
+- [x] Tests: `tests/test_log_streaming.sh` (3 new tests, total 16)
 
 ### Docker memory limits on containers
 No memory limits on worker containers. A worker generating OOM-inducing code can take down the host.

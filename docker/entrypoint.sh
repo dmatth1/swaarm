@@ -18,6 +18,26 @@ if [[ -n "${MODEL:-}" ]]; then
     CLAUDE_MODEL_FLAG="--model $MODEL"
 fi
 
+# Max log file size in bytes (default 10MB). Truncates from the front,
+# keeping the most recent output. Set MAX_LOG_SIZE=0 to disable.
+MAX_LOG_SIZE="${MAX_LOG_SIZE:-10485760}"
+
+# Truncate a log file if it exceeds MAX_LOG_SIZE, keeping the tail.
+truncate_log() {
+    local _tl_file="$1"
+    [[ "$MAX_LOG_SIZE" -eq 0 ]] && return
+    [[ -f "$_tl_file" ]] || return
+    local _tl_size
+    _tl_size=$(stat -f%z "$_tl_file" 2>/dev/null || stat -c%s "$_tl_file" 2>/dev/null || echo 0)
+    if [[ "$_tl_size" -gt "$MAX_LOG_SIZE" ]]; then
+        local _tl_tmp
+        _tl_tmp=$(mktemp)
+        echo "[log truncated — exceeded ${MAX_LOG_SIZE} bytes at $(date)]" > "$_tl_tmp"
+        tail -c "$MAX_LOG_SIZE" "$_tl_file" >> "$_tl_tmp"
+        mv "$_tl_tmp" "$_tl_file"
+    fi
+}
+
 # Run claude with real-time log streaming.
 # --output-format stream-json --include-partial-messages streams tokens as they
 # arrive (no PTY needed — streaming is built into the CLI flag).
@@ -39,6 +59,9 @@ run_claude() {
     python3 "$(dirname "$0")/stream_parse.py" "$CLAUDE_OUTPUT_FILE" "$_rc_log" || true
 
     rm -f "$_rc_prompt_file"
+
+    # Cap log file size after each invocation
+    truncate_log "$_rc_log"
 }
 
 # Security notice for public repos — prepended to all prompts when set
