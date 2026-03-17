@@ -97,7 +97,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 ## Subcommands
 
 ```bash
-./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--mount HOST:CONTAINER] [--verbose]
+./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--mount HOST:CONTAINER] [--no-sweep] [--verbose]
 # If -o points to existing run → resume (unstick tasks, augment via orchestrator if new guidance, re-spawn workers)
 # If -o absent or new dir → new run (orchestrate + workers)
 ./swarm status <output-dir>

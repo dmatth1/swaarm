@@ -2,26 +2,11 @@
 
 ## P2 — Should fix
 
-### `--no-sweep` flag to skip pre-flight and post-augment specialist sweeps
-Pre-flight and post-augment specialist sweeps can be slow. Add a flag to skip them while keeping periodic sweeps (which run during normal operation and catch issues over time).
-- [ ] Add `--no-sweep` CLI flag (default: false — all sweeps run as normal)
-- [ ] Store in `swarm.state` as `SWARM_NO_SWEEP` for resume
-- [ ] Skip pre-flight and post-augment `run_specialist_sweep` calls when set; keep periodic sweeps
-- [ ] Update `--help` and CLAUDE.md
-
 ### Auto-fallback on 529 overload
 Workers backoff and retry the same model indefinitely on 529. Should detect sustained overload and switch to a fallback model (e.g. opus → sonnet).
 - [ ] Detect 529 separately from rate-limit (429)
 - [ ] After N consecutive 529s, switch to fallback model
 - [ ] Make fallback chain configurable (`--fallback-model sonnet`)
-
-### CID file written before container starts
-`docker run -d` returns immediately. If the container fails to start, the `.cid` file points to a dead container and `check_and_respawn_dead_workers` may unstick tasks unnecessarily.
-- [ ] Verify container is running after `docker run -d` before writing `.cid`
-
-### Specialist failures silently ignored
-`run_specialist_sweep` uses `&` + `wait || true` — crashed specialists are invisible.
-- [ ] Capture exit codes from `wait`, log warnings on failure
 
 ## P3 — Later (cloud prep)
 

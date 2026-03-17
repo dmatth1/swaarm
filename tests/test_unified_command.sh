@@ -296,4 +296,84 @@ main 2>/dev/null || true
 teardown_test
 trap - EXIT
 
+# ─── Test: --no-sweep persisted in state file and skips pre-flight ────────
+
+setup_test "unified: --no-sweep saved to state and skips pre-flight sweep"
+trap teardown_test EXIT
+
+load_swarm
+setup_main_mocks
+
+OUTPUT_DIR="$TEST_TMPDIR/output"
+TASK="build something"
+NUM_AGENTS=1
+SWARM_NO_SWEEP=true
+
+SWEEP_CALLS=()
+run_specialist_sweep() { SWEEP_CALLS+=("$1"); }
+
+main 2>/dev/null || true
+
+# State file should contain SWARM_NO_SWEEP=true
+grep -q 'SWARM_NO_SWEEP=true' "$OUTPUT_DIR/swarm.state" \
+    && pass "--no-sweep saved to swarm.state" \
+    || fail "--no-sweep not in swarm.state"
+
+# Pre-flight sweep should NOT have been called
+found_preflight=false
+for s in "${SWEEP_CALLS[@]+"${SWEEP_CALLS[@]}"}"; do
+    [[ "$s" == *"pre-flight"* ]] && found_preflight=true
+done
+[[ "$found_preflight" == "false" ]] \
+    && pass "pre-flight sweep skipped with --no-sweep" \
+    || fail "pre-flight sweep ran despite --no-sweep"
+
+teardown_test
+trap - EXIT
+
+# ─── Test: --no-sweep restores from state on resume ──────────────────────
+
+setup_test "unified: --no-sweep restores from state on resume"
+trap teardown_test EXIT
+
+init_test_workspace
+load_swarm
+setup_main_mocks
+
+push_file_to_repo "tasks/done/001-setup.md" "# Task 001" "done 001"
+
+# Write state with no-sweep
+{
+    printf 'SWARM_TASK=%q\n' "build a thing"
+    printf 'SWARM_AGENTS=%s\n' "1"
+    printf 'SWARM_MODEL=%q\n' ""
+    printf 'SWARM_REPO=%q\n' ""
+    printf 'SWARM_NO_SWEEP=%s\n' "true"
+    printf 'SWARM_STARTED="%s"\n' "$(date)"
+} > "$OUTPUT_DIR/swarm.state"
+
+TASK=""
+NUM_AGENTS=1
+SWARM_NO_SWEEP=false  # CLI default — should be overridden by state file
+
+SWEEP_CALLS=()
+run_specialist_sweep() { SWEEP_CALLS+=("$1"); }
+
+main 2>/dev/null || true
+
+[[ "$SWARM_NO_SWEEP" == "true" ]] \
+    && pass "--no-sweep restored from state file on resume" \
+    || fail "SWARM_NO_SWEEP not restored (value: $SWARM_NO_SWEEP)"
+
+found_preflight=false
+for s in "${SWEEP_CALLS[@]+"${SWEEP_CALLS[@]}"}"; do
+    [[ "$s" == *"pre-flight"* ]] && found_preflight=true
+done
+[[ "$found_preflight" == "false" ]] \
+    && pass "pre-flight-resume skipped with --no-sweep from state" \
+    || fail "pre-flight-resume ran despite --no-sweep from state"
+
+teardown_test
+trap - EXIT
+
 print_summary

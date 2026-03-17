@@ -30,6 +30,7 @@ MAX_WORKER_ITERATIONS=100
 DOCKER_IMAGE="swarm-agent"
 MODEL=""
 REMOTE_REPO=""  # GitHub URL — if set, repo.git mirrors to this remote
+SWARM_NO_SWEEP=false  # Skip pre-flight and post-augment specialist sweeps
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
 
@@ -52,6 +53,7 @@ Options:
   --repo URL            Push to a remote GitHub repo (e.g. https://github.com/user/repo)
   --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
+  --no-sweep            Skip pre-flight and post-augment specialist sweeps (keeps periodic)
   -h, --help            Show this help
 
 Subcommands:
@@ -402,8 +404,10 @@ cmd_resume() {
     echo
 
     # Pre-flight specialist sweep before re-spawning workers
-    _g_specialist_count=0
-    run_specialist_sweep "pre-flight-resume"
+    if [[ "$SWARM_NO_SWEEP" != "true" ]]; then
+        _g_specialist_count=0
+        run_specialist_sweep "pre-flight-resume"
+    fi
     sync_main
     echo
 
@@ -552,6 +556,15 @@ docker_run_worker() {
         "$DOCKER_IMAGE" \
         worker "$agent_id" > /dev/null
 
+    # Verify container is actually running before writing .cid
+    # (docker run -d returns immediately even if the container fails to start)
+    sleep 1
+    if ! docker inspect --format='{{.State.Running}}' "$container_name" 2>/dev/null | grep -q "true"; then
+        warn "Worker $agent_id container failed to start — not writing .cid"
+        docker rm -f "$container_name" 2>/dev/null || true
+        return 1
+    fi
+
     # Track container for kill/status
     mkdir -p "$OUTPUT_DIR/pids"
     echo "$container_name" > "$OUTPUT_DIR/pids/worker-${agent_id}.cid"
@@ -671,10 +684,15 @@ run_specialist_sweep() {
         pids+=($!)
     done
 
-    # Wait for all to finish
-    for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
+    # Wait for all to finish — log failures instead of silently ignoring
+    local _failed=0
+    for i in $(seq 0 $(( count - 1 ))); do
+        if ! wait "${pids[$i]}" 2>/dev/null; then
+            warn "Specialist ${specialist_names[$i]} failed (sweep: ${sweep_label})"
+            _failed=$((_failed + 1))
+        fi
     done
+    [[ "$_failed" -gt 0 ]] && warn "$_failed of $count specialist(s) failed in sweep: ${sweep_label}"
 
     sync_main
 }
@@ -1112,6 +1130,7 @@ main() {
             # CLI flags override saved state; saved state fills gaps
             [[ -z "$MODEL" && -n "${SWARM_MODEL:-}" ]] && MODEL="$SWARM_MODEL"
             [[ -z "$REMOTE_REPO" && -n "${SWARM_REPO:-}" ]] && REMOTE_REPO="$SWARM_REPO"
+            [[ "$SWARM_NO_SWEEP" == "false" && "${SWARM_NO_SWEEP:-false}" == "true" ]] && SWARM_NO_SWEEP=true
         fi
     fi
 
@@ -1209,8 +1228,10 @@ main() {
             sync_main
 
             # Specialist sweep after augmentation — validate new tasks
-            _g_specialist_count=0
-            run_specialist_sweep "post-augment"
+            if [[ "$SWARM_NO_SWEEP" != "true" ]]; then
+                _g_specialist_count=0
+                run_specialist_sweep "post-augment"
+            fi
             sync_main
             echo
         fi
@@ -1239,6 +1260,7 @@ main() {
             printf 'SWARM_AGENTS=%s\n' "$NUM_AGENTS"
             printf 'SWARM_MODEL=%q\n' "$MODEL"
             printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
+            printf 'SWARM_NO_SWEEP=%s\n' "$SWARM_NO_SWEEP"
             printf 'SWARM_STARTED="%s"\n' "$(date)"
         } > "$OUTPUT_DIR/swarm.state"
 
@@ -1250,8 +1272,10 @@ main() {
         echo
 
         # Pre-flight specialist sweep
-        _g_specialist_count=0
-        run_specialist_sweep "pre-flight"
+        if [[ "$SWARM_NO_SWEEP" != "true" ]]; then
+            _g_specialist_count=0
+            run_specialist_sweep "pre-flight"
+        fi
         sync_main
         echo
 
@@ -1336,6 +1360,7 @@ while [[ $# -gt 0 ]]; do
         --repo)             REMOTE_REPO="$2"; shift 2 ;;
         --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
+        --no-sweep)         SWARM_NO_SWEEP=true; shift ;;
         -h|--help)      usage; exit 0 ;;
         -*)             error "Unknown option: $1"; usage; exit 1 ;;
         *)              TASK="${TASK:+$TASK }$1"; shift ;;

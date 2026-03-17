@@ -516,4 +516,58 @@ fi
 teardown_test
 trap - EXIT
 
+# ─── Test: Specialist failures logged, not silently ignored ───────────────
+
+setup_test "specialist sweep: failed specialists logged with names"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Create a SPEC.md with specialists
+push_file_to_repo "SPEC.md" "# Spec
+## Specialists
+### GoodSpecialist
+You always succeed.
+### BadSpecialist
+You always fail.
+### OtherGood
+You also succeed." "add specialists"
+
+load_swarm
+
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { (cd "$MAIN_DIR" && git pull origin main -q 2>/dev/null) || true; }
+
+# Mock docker_run_specialist: BadSpecialist fails, others succeed
+docker_run_specialist() {
+    local name="$1"
+    if [[ "$name" == "BadSpecialist" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Capture log output
+LOG_OUTPUT=""
+log()  { LOG_OUTPUT+="$*"$'\n'; }
+warn() { LOG_OUTPUT+="WARN: $*"$'\n'; }
+
+_g_specialist_count=0
+run_specialist_sweep "test-failure"
+
+echo "$LOG_OUTPUT" | grep -q "BadSpecialist failed" \
+    && pass "failed specialist name logged" \
+    || fail "failed specialist name not in log output"
+
+echo "$LOG_OUTPUT" | grep -q "1 of 3 specialist(s) failed" \
+    && pass "failure count logged correctly" \
+    || fail "failure count not logged (log: $LOG_OUTPUT)"
+
+teardown_test
+trap - EXIT
+
 print_summary
