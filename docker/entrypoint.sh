@@ -18,6 +18,31 @@ if [[ -n "${MODEL:-}" ]]; then
     CLAUDE_MODEL_FLAG="--model $MODEL"
 fi
 
+# Run claude with unbuffered output for real-time log streaming.
+# Without this, `claude -p` detects it's writing to a pipe and block-buffers,
+# making logs go silent for the entire 15-30 min session.
+# `script -qfc` creates a PTY so claude sees a terminal → line-buffered output.
+# Sets the caller's $output variable with the full response text.
+run_claude() {
+    local _rc_prompt="$1"
+    local _rc_log="$2"
+
+    local _rc_prompt_file
+    _rc_prompt_file=$(mktemp)
+    printf '%s' "$_rc_prompt" > "$_rc_prompt_file"
+
+    # script creates a PTY so claude sees a terminal → streams output.
+    # macOS and Linux have incompatible script flags.
+    # tr -d '\r': strip carriage returns added by PTY.
+    if [[ "$(uname)" == "Darwin" ]]; then
+        output=$(script -q /dev/null sh -c "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" 2>&1 | tr -d '\r' | tee -a "$_rc_log") || true
+    else
+        output=$(script -qfc "claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p < '$_rc_prompt_file'" /dev/null 2>&1 | tr -d '\r' | tee -a "$_rc_log") || true
+    fi
+
+    rm -f "$_rc_prompt_file"
+}
+
 # Security notice for public repos — prepended to all prompts when set
 SECURITY_NOTICE=""
 if [[ "${PUBLIC_REPO:-false}" == "true" ]]; then
@@ -74,8 +99,8 @@ run_orchestrator() {
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
-    # Run Claude — always tee to log for real-time streaming via tail -f
-    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
+    local output
+    run_claude "$prompt" "$log_file"
 
     echo "=== Orchestrator finished $(date) ===" >> "$log_file"
 }
@@ -115,8 +140,8 @@ run_inject() {
 
     echo "Inject agent adding tasks for: $guidance" >> "$log_file"
 
-    # Always tee to log for real-time streaming via tail -f
-    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
+    local output
+    run_claude "$prompt" "$log_file"
 
     echo "=== Inject agent finished $(date) ===" >> "$log_file"
 }
@@ -145,8 +170,8 @@ run_reviewer() {
                  /prompts/reviewer.md)
     prompt="${SECURITY_NOTICE}${prompt}"
 
-    # Always tee to log for real-time streaming via tail -f
-    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
+    local output
+    run_claude "$prompt" "$log_file"
 
     echo "=== Reviewer ${review_num} finished $(date) ===" >> "$log_file"
 }
@@ -185,8 +210,8 @@ run_specialist() {
     }')
     prompt="${SECURITY_NOTICE}${prompt}"
 
-    # Always tee to log for real-time streaming via tail -f
-    output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
+    local output
+    run_claude "$prompt" "$log_file"
 
     echo "=== Specialist ${specialist_name} (${specialist_num}) finished $(date) ===" >> "$log_file"
 }
@@ -256,9 +281,9 @@ run_worker() {
         echo -e "\n--- Worker $agent_id (pending attempt, $(date)) ---" >> "$log_file"
         echo "State: pending=$pending own_active=$own_active all_active=$all_active" >> "$log_file"
 
-        # Run one agent session — always tee to log for real-time streaming via tail -f
+        # Run one agent session
         local output
-        output=$(echo "$prompt" | claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p 2>&1 | tee -a "$log_file") || true
+        run_claude "$prompt" "$log_file"
 
         # Check for rate-limit — keep task claimed, sleep, retry (does NOT count as an iteration)
         if echo "$output" | grep -qi "rate limit\|too many requests\|quota exceeded\|429 \|hit your limit\|resets.*UTC"; then

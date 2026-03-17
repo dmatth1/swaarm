@@ -112,9 +112,9 @@ PATH="$MOCK_BIN:/usr/bin:/bin:/usr/sbin" \
 # The orchestrator function uses hardcoded paths (/upstream, /workspace, /logs).
 # We test it differently: verify the tee pattern is present in the source.
 
-grep -q 'tee -a "$log_file"' "$ENTRYPOINT" \
-    && pass "orchestrator uses tee (verified in source)" \
-    || fail "orchestrator missing tee pattern"
+grep -q 'run_claude' "$ENTRYPOINT" \
+    && pass "orchestrator uses run_claude (verified in source)" \
+    || fail "orchestrator missing run_claude call"
 
 teardown_test
 trap - EXIT
@@ -161,17 +161,22 @@ trap - EXIT
 setup_test "streaming: all claude calls use tee -a pattern"
 trap teardown_test EXIT
 
-# Count claude calls that DON'T use tee (the old buffered pattern)
-buffered=$(grep -c 'claude.*-p >>.*2>&1' "$ENTRYPOINT" 2>/dev/null) || buffered=0
-[[ "$buffered" -eq 0 ]] \
-    && pass "no buffered claude calls remain (old >> pattern gone)" \
-    || fail "$buffered claude call(s) still use buffered >> pattern"
+# Count direct claude calls that bypass run_claude (the old pattern)
+direct=$(grep -c 'echo.*\$prompt.*|.*claude' "$ENTRYPOINT" 2>/dev/null) || direct=0
+[[ "$direct" -eq 0 ]] \
+    && pass "no direct claude pipe calls remain (all use run_claude)" \
+    || fail "$direct claude call(s) still bypass run_claude"
 
-# Count claude calls that DO use tee
-tee_count=$(grep -c 'claude.*tee -a' "$ENTRYPOINT" 2>/dev/null || echo 0)
-[[ "$tee_count" -ge 4 ]] \
-    && pass "at least 4 roles use tee -a ($tee_count found)" \
-    || fail "expected at least 4 tee -a calls, found $tee_count"
+# Verify run_claude is called from each role (5 roles)
+role_calls=$(grep -c 'run_claude "\$prompt"' "$ENTRYPOINT" 2>/dev/null || echo 0)
+[[ "$role_calls" -ge 5 ]] \
+    && pass "all 5 roles call run_claude ($role_calls found)" \
+    || fail "expected at least 5 run_claude calls, found $role_calls"
+
+# Verify run_claude uses script for PTY-based streaming
+grep -q 'script.*claude' "$ENTRYPOINT" \
+    && pass "run_claude uses script for PTY-based streaming" \
+    || fail "run_claude missing script PTY wrapper"
 
 teardown_test
 trap - EXIT

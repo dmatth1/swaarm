@@ -233,14 +233,16 @@ trap - EXIT
 setup_test "model: all entrypoint claude calls use CLAUDE_MODEL_FLAG"
 trap teardown_test EXIT
 
-# Count claude calls that include model flag
-model_calls=$(grep -c 'CLAUDE_MODEL_FLAG' "$ENTRYPOINT" 2>/dev/null) || model_calls=0
-# Subtract the definition line
-model_calls=$((model_calls - 2))  # 2 lines: definition + if block
+# All roles must call run_claude (which uses CLAUDE_MODEL_FLAG internally)
+role_calls=$(grep -c 'run_claude "\$prompt"' "$ENTRYPOINT" 2>/dev/null) || role_calls=0
+[[ "$role_calls" -ge 5 ]] \
+    && pass "all 5 roles call run_claude which passes CLAUDE_MODEL_FLAG ($role_calls calls)" \
+    || fail "expected at least 5 run_claude calls, found $role_calls"
 
-[[ "$model_calls" -ge 5 ]] \
-    && pass "all 5 claude calls use CLAUDE_MODEL_FLAG ($model_calls usage sites)" \
-    || fail "expected at least 5 CLAUDE_MODEL_FLAG usages, found $model_calls"
+# Verify run_claude uses CLAUDE_MODEL_FLAG
+grep -q 'CLAUDE_MODEL_FLAG' "$ENTRYPOINT" \
+    && pass "run_claude uses CLAUDE_MODEL_FLAG" \
+    || fail "run_claude missing CLAUDE_MODEL_FLAG"
 
 teardown_test
 trap - EXIT
