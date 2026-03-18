@@ -789,7 +789,17 @@ run_with_review() {
     monitor_progress &
     local monitor_pid=$!
 
+    # Load previously reviewed tasks from disk — avoids re-reviewing everything
+    # on resume. New runs start with an empty file (nothing to skip).
+    local reviewed_file="$OUTPUT_DIR/reviewed.list"
     local reviewed=()
+    if [[ -f "$reviewed_file" ]]; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && reviewed+=("$line")
+        done < "$reviewed_file"
+        log "Loaded ${#reviewed[@]} previously reviewed task(s)"
+    fi
+
     local blocked_handled=()
     local review_count=0
     # _g_specialist_count is NOT reset here — it may already be non-zero from a
@@ -840,6 +850,7 @@ run_with_review() {
             log "Running reviewer ${review_count} for: $task_name"
             docker_run_reviewer "$task_name" "$review_count"
             reviewed+=("$task_name")
+            echo "$task_name" >> "$reviewed_file"
 
             # If tests failed, trigger orchestrator immediately to add fix tasks
             if grep -q "TESTS_FAIL" "$LOGS_DIR/reviewer-${review_count}.log" 2>/dev/null; then
