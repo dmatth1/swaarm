@@ -1,5 +1,12 @@
 # Swarm Backlog
 
+## P1 — Fix now
+
+### Dead worker detection fails when containers are removed (not just stopped)
+`check_and_respawn_dead_workers` uses `docker inspect` on the container ID from the CID file. If the container was removed entirely (not just stopped), `docker inspect` fails silently and the function never triggers respawn. Workers stay dead with tasks stuck in `active/`, harness keeps polling but never recovers. Observed: all 3 workers died, harness detected "Tasks stuck: 3" but never respawned — required manual restart.
+- [ ] `check_and_respawn_dead_workers` should treat "container not found" the same as "container exited"
+- [ ] Test: worker container removed (not stopped) → harness detects and respawns
+
 ## P2 — Should fix
 
 ### `./swarm sweep` subcommand — **Done**
