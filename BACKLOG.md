@@ -36,3 +36,40 @@ Review loop runs indefinitely. No safety valve.
 `test_cleanup.sh`, `test_dead_worker.sh`, and `test_kill.sh` run sequentially (shared container namespaces).
 - [ ] Unique container name prefixes per test suite
 - [ ] Remove sequential exception from `run_tests.sh`
+
+## P4 — App review ideas
+
+### Task dependency graph visualization
+No way to see the task DAG at a glance. Mental tracing of `Dependencies: 001, 003` across files is tedious for large runs.
+- [ ] `./swarm graph <dir>` subcommand outputting DOT or Mermaid diagram
+- [ ] Color-code nodes by state (pending/active/done/blocked)
+
+### Configurable specialist roster
+6 specialists always run regardless of project complexity, wasting API calls on simple projects.
+- [ ] `--specialists "PM,QA"` flag to select which specialists run
+- [ ] Or read from `.swarmrc` config file
+
+### Reviewed tasks cleanup on augment
+`reviewed.list` persists forever. If orchestrator creates new tasks with recycled numbers, they skip review.
+- [ ] Clear entries for tasks that get re-created during augment
+
+### Multi-repo coordination
+Swarm operates on a single repo. Many real projects span frontend + backend + infra.
+- [ ] Support `--mount` for additional repos workers can commit to
+
+### Incremental test running
+Reviewer always runs full test suite. Slow for large projects (10+ min suites).
+- [ ] Detect which test files cover changed modules
+- [ ] Run only related tests in reviewer, full suite on final drain
+
+### Worker task affinity
+All workers are identical. Worker that did `003-setup-database` has packages/context for `007-add-migrations`.
+- [ ] Lightweight affinity: prefer workers who completed prerequisite tasks
+
+### Post-mortem report
+No summary at run completion. Hard to tune future runs or understand failures.
+- [ ] Generate report: total time, tasks completed, test failures, specialist findings, respawn events, rate-limit backoffs
+
+### Dry-run mode
+No way to preview orchestration before burning API credits.
+- [ ] `./swarm --dry-run "build X"` — run orchestrator only, show task DAG, exit without spawning workers
