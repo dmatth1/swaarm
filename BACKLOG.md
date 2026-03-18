@@ -7,6 +7,12 @@ Tests source `entrypoint.sh` directly on macOS, but production runs inside Docke
 - Option A: Run entrypoint-dependent tests inside Docker containers — test env literally is production env
 - Option B: Require GNU coreutils on macOS (`brew install coreutils`) as a dev dependency, remove the conditional fallback
 
+### Orchestrator should consolidate expensive builds into single tasks — **Done**
+- [x] Added "Consolidate expensive builds" rule to `prompts/orchestrator.md` with `artifact:<path>` syntax
+- [x] Extended `## Produces` / `## Consumes` in `prompts/task-format.md` to support `artifact:<path>` entries
+- [x] Worker prompt (Step 7) checks consumed artifacts exist on disk; emits `NO_TASKS` if missing
+- [x] ProjectManager specialist: added build duplication check (flag 3+ tasks building same binary)
+
 ### Auto-fallback on 529 overload
 Workers backoff and retry the same model indefinitely on 529. Should detect sustained overload and switch to a fallback model (e.g. opus → sonnet).
 - [ ] Detect 529 separately from rate-limit (429)

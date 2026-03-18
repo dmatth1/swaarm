@@ -53,12 +53,14 @@ The right size for a task is one where a worker can complete it by reading SPEC.
 
 **`## Produces`:**
 - Names the interface from SPEC.md `## Interfaces` that this task implements
-- Write `None` (bare word, no backticks, on the line after the header) if this task produces no named interface — e.g., project setup, testing tasks, integration tasks
+- For build artifacts: use `artifact:<path>` (e.g., `artifact:build/StandaloneApp`) — workers that consume this artifact will verify it exists before starting
+- Write `None` (bare word, no backticks, on the line after the header) if this task produces no named interface or artifact — e.g., testing tasks, documentation tasks
 
 **`## Consumes`:**
 - Lists interface names from SPEC.md `## Interfaces`, one per line
-- Write `None` (bare word, no backticks, on the line after the header) if this task has no interface dependencies
-- Workers read these interface definitions from SPEC.md after claiming the task
+- For build artifacts: use `artifact:<path>` (e.g., `artifact:build/StandaloneApp`) — worker will verify this path exists before starting work; if missing, the worker skips the task
+- Write `None` (bare word, no backticks, on the line after the header) if this task has no interface or artifact dependencies
+- Workers read interface definitions from SPEC.md and check artifact paths after claiming the task
 
 **`## Tests`:**
 - Specify exact test file paths and test function names the worker must write

@@ -89,17 +89,18 @@ Read each file listed with a `Read:` or `Modify:` prefix — these give you the 
 
 This list is a starting point, not a hard boundary. If you discover you need context from a file not listed, read it. But most tasks should not require reading beyond this list.
 
-### Step 7: Load Interface Context
+### Step 7: Load Interface Context and Check Artifacts
 
-After loading relevant files, enumerate the interfaces your task consumes:
+After loading relevant files, enumerate the interfaces and artifacts your task consumes:
 
 ```bash
 awk '/^## Consumes/{found=1; next} found && /^## /{exit} found && NF{print}' \
   tasks/active/{{AGENT_ID}}--NNN-task-name.md
 ```
 
-- If the output is empty or `None`: skip to Step 7 — no interface context needed.
-- Otherwise, for each interface name in the output, extract its definition from SPEC.md:
+- If the output is empty or `None`: skip to Step 8 — no interface context needed.
+- **For `artifact:<path>` entries**: verify the artifact exists on disk. If it does not exist, the producing task hasn't completed on this worker yet — output `<promise>NO_TASKS</promise>` and stop. You'll be called again after the producing task completes.
+- **For interface names**: extract each definition from SPEC.md:
 
 ```bash
 awk '/^### InterfaceName$/{found=1; next} found && /^### /{exit} found{print}' SPEC.md
