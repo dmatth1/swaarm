@@ -18,8 +18,3 @@ No visibility into API token spend per run.
 
 ### Task dependency graph visualization
 - [ ] Agent can generate DOT/Mermaid diagram of task DAG on request
-
-### Incremental test running
-Reviewer behavior lives in `prompts/reviewer.md`, independent of harness architecture. Still relevant.
-- [ ] Reviewer detects changed files, runs only related tests
-- [ ] Full suite on final drain only
