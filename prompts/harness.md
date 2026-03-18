@@ -284,7 +284,7 @@ Always run ProjectManager last (after all others complete).
 
 ## State File
 
-`<output-dir>/harness-state.json` — read and write this every monitoring cycle.
+`<output-dir>/harness-state.json` — read and write this every monitoring cycle. **Never store the OAuth token in this file.** Re-extract it from `swarm-setup.sh --resume` each session.
 
 ```json
 {
@@ -299,7 +299,6 @@ Always run ProjectManager last (after all others complete).
   "main_dir": "/path/to/output/main",
   "logs_dir": "/path/to/output/logs",
   "prompts_dir": "/path/to/prompts",
-  "oauth_token": "<token>",
   "reviewed": ["001-task.md", "002-task.md"],
   "review_count": 5,
   "last_sweep_at_done_count": 12,
