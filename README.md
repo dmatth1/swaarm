@@ -169,16 +169,28 @@ Same coordination as Anthropic's 16-agent compiler experiment. When two workers 
 
 No lock server. Git's atomic push is the lock.
 
-## vs. the Anthropic blog post
+## Swarm vs Claude Code Agent Teams
 
-swarm closely matches Anthropic's original multi-agent architecture:
+[Agent Teams](https://code.claude.com/docs/en/agent-teams) is Anthropic's built-in multi-agent feature where Claude Code sessions message each other, debate, and collaborate. Swarm takes a different approach — fully isolated Docker containers coordinating through git.
 
-- Bare git repo as the shared coordination hub
-- Each agent in its own Docker container with isolated `/workspace`
-- Git's atomic push as the distributed lock
-- Stateless agent invocations (each Claude session reads the repo fresh)
+They solve different problems:
 
-**What swarm adds:** a 3-state task machine (`pending/` → `active/` → `done/`), a reviewer quality gate, periodic specialist sweeps, and an adaptive agent harness that can reason about failures.
+| | Agent Teams | Swarm |
+|---|---|---|
+| **Optimized for** | Research, review, debate | Building software autonomously |
+| **Coordination** | Shared task list + direct messaging | Git commits to bare repo |
+| **Agent isolation** | Shared filesystem (must avoid file conflicts) | Each agent in its own Docker container |
+| **Crash recovery** | Manual (teammates may stop on errors) | Automatic (detect dead containers, unstick tasks, respawn) |
+| **Rate limits** | No built-in handling | Exponential backoff, keep task claimed |
+| **Quality gates** | Manual (prompt teammates to test) | Automated reviewer after every completion |
+| **Long-running** | "Letting a team run unattended increases risk" | Designed for hours/days unattended |
+| **Session resume** | Broken (teammates lost on `/resume`) | Works (harness re-reads git + state file) |
+| **Communication** | Agents talk to each other | Agents are fully isolated — state is in git |
+| **Setup** | Built-in, enable a flag | Docker + setup script + prompt files |
+
+**Use Agent Teams** when agents need to talk — competing hypotheses, multi-angle code review, research synthesis.
+
+**Use Swarm** when you need to build — structured task decomposition, crash recovery, quality gates, overnight autonomy.
 
 ## Customizing agent behavior
 
