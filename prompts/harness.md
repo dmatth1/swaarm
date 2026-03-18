@@ -135,7 +135,13 @@ cd <repo-dir> && git push github --all -q 2>/dev/null || true
 
 Apply these in order each cycle. Use judgment — these are guidelines, not rigid rules.
 
-**New completions →** For each task in `tasks/done/` not in the state file's `reviewed` list:
+**New completions →** For each task in `tasks/done/` not in the state file's `reviewed` list, decide whether to review now or defer. You don't have to review every task immediately — the final drain runs a full test suite regardless. Consider:
+- How many containers are already running (resource pressure)
+- Whether recent reviews have been passing or failing (if failing, review more aggressively)
+- How many unreviewed tasks have accumulated (don't let too many pile up)
+- Whether the task touches critical/shared code vs. isolated work
+
+When you do review:
 - Run a reviewer container for that task
 - Check the reviewer log for `TESTS_PASS` or `TESTS_FAIL`
 - If `TESTS_FAIL`: compute next task number, run orchestrator in augment mode to add fix tasks
@@ -152,7 +158,7 @@ Apply these in order each cycle. Use judgment — these are guidelines, not rigi
 - Then run ProjectManager solo to consolidate
 - Sync main after
 
-**Final drain →** When pending = 0, active = 0, and all done tasks are reviewed:
+**Final drain →** When pending = 0, active = 0, and no reviewers are still running:
 - Run final specialist sweep (all specialists parallel, then PM solo)
 - Run final reviewer with `COMPLETED_TASK=--final--`
 - If `TESTS_PASS`: declare run complete, stop monitoring
