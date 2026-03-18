@@ -12,7 +12,7 @@ When the user asks you to run swarm for a project:
 
 1. **Determine parameters** from the user's request:
    - Task description (what to build)
-   - Number of workers (default 3)
+   - Number of workers (the user's number is a **maximum**, not a target — see Worker Count below)
    - Model (default `sonnet`)
    - Output directory (default `swarm-YYYYMMDD-HHMMSS`)
    - Remote repo URL (optional, for GitHub mirroring)
@@ -163,6 +163,13 @@ When you do review:
 - Run final reviewer with `COMPLETED_TASK=--final--`
 - If `TESTS_PASS`: declare run complete, stop monitoring
 - If `TESTS_FAIL`: run orchestrator to add fix tasks, continue monitoring
+
+**Worker count →** The user's requested worker count is a **maximum**, not a fixed number. Adjust dynamically based on conditions:
+- **At launch**: read the task files after orchestration. If there are only 4 pending tasks, don't spawn 5 workers — one will just idle. Match workers to available parallelism (tasks without unsatisfied dependencies).
+- **Mid-run**: if workers are hitting rate limits, OOMing, or the remaining tasks are sequential (each depends on the previous), stop or don't respawn excess workers. Fewer workers under less pressure often finish faster than many workers fighting for resources.
+- **Scale down**: when pending tasks drop below the worker count, let excess workers exit naturally (they'll see no tasks and sleep). Don't respawn them.
+- **Scale up**: if the orchestrator adds a batch of new tasks mid-run (augment mode) and you have fewer workers than the user's maximum, spawn more.
+- Never exceed the user's requested maximum. Log scaling decisions in the state file.
 
 **Model selection →** You don't have to use the same model for every agent. Pick the model based on the role and task complexity:
 - **Orchestrator**: use the strongest available model — task decomposition and architecture decisions have the highest leverage. A bad plan wastes every worker's effort.
