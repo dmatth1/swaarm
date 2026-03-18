@@ -8,10 +8,6 @@ Workers backoff and retry the same model indefinitely on 529. Should detect sust
 - [ ] After N consecutive 529s, switch to fallback model
 - [ ] Make fallback chain configurable (`--fallback-model sonnet`)
 
-### Reviewed tasks cleanup on augment
-`reviewed.list` persists forever. If orchestrator creates new tasks with recycled numbers, they skip review.
-- [ ] Clear entries for tasks that get re-created during augment
-
 ### Test environment should match production (Docker)
 Tests source `entrypoint.sh` directly on macOS, but production runs inside Docker (Linux). Code paths like `timeout` need conditional fallbacks, and the actual production path is never tested.
 - Option A: Run entrypoint-dependent tests inside Docker containers
