@@ -19,10 +19,6 @@ No visibility into API token spend per run.
 ### Task dependency graph visualization
 - [ ] Agent can generate DOT/Mermaid diagram of task DAG on request
 
-### Worker task affinity
-Workers get `MODEL` and identity at container start — can't reassign per-task. Affinity would require the harness to track which worker did which prerequisite and route tasks accordingly, but workers self-select tasks from the queue.
-- [ ] Explore: harness hints preferred worker in task file, worker prompt checks hint before claiming
-
 ### Incremental test running
 Reviewer behavior lives in `prompts/reviewer.md`, independent of harness architecture. Still relevant.
 - [ ] Reviewer detects changed files, runs only related tests
