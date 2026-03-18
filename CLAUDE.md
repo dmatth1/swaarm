@@ -155,7 +155,7 @@ Tests mock the Claude CLI (no API tokens). E2E tests (`test_e2e.sh`) use a mock 
 Key test files:
 - `test_e2e.sh` — Full lifecycle, crash recovery, resume, specialist sweeps, rate limit, log streaming
 - `test_reviewer_loop.sh` — Review loop: TESTS_PASS/TESTS_FAIL signals, stuck detection, blocked tasks, specialist parallel execution, respawn cap
-- `test_quiet_periods.sh` — Periodic restructuring: orchestrator at interval, TESTS_FAIL triggers orchestrator, artifact compliance
+- `test_periodic_and_drain.sh` — Periodic orchestrator, artifact compliance, final drain on resume, reviewed.list persistence
 - `test_unified_command.sh` — New run vs resume detection, orchestrator augment, state restore
 - `test_kill.sh` — Kill specific/all workers, missing pids dir, already-stopped containers
 - `test_remote_repo.sh` — GitHub remote setup, sync_remote push, PUBLIC_REPO security notice
