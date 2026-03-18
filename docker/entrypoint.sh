@@ -156,6 +156,13 @@ run_orchestrator() {
     prompt="${prompt}
 $(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
+    [[ -n "${EXTRA_GUIDANCE:-}" ]] && prompt="${prompt}
+
+---
+
+## Additional Guidance from Harness
+
+${EXTRA_GUIDANCE}"
 
     echo "Orchestrator analyzing task and creating subtasks..." >> "$log_file"
 
@@ -195,6 +202,13 @@ run_reviewer() {
     prompt="${prompt}
 $(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
+    [[ -n "${EXTRA_GUIDANCE:-}" ]] && prompt="${prompt}
+
+---
+
+## Additional Guidance from Harness
+
+${EXTRA_GUIDANCE}"
 
     run_claude "$prompt" "$log_file"
     rm -f "$CLAUDE_OUTPUT_FILE"
@@ -242,6 +256,13 @@ run_specialist() {
     prompt="${prompt}
 $(cat "${PROMPTS_DIR:-/prompts}/task-format.md")"
     prompt="${SECURITY_NOTICE}${prompt}"
+    [[ -n "${EXTRA_GUIDANCE:-}" ]] && prompt="${prompt}
+
+---
+
+## Additional Guidance from Harness
+
+${EXTRA_GUIDANCE}"
 
     run_claude "$prompt" "$log_file"
     rm -f "$CLAUDE_OUTPUT_FILE"
@@ -282,6 +303,13 @@ run_worker() {
     local prompt
     prompt=$(sed "s|{{AGENT_ID}}|${worker_name}|g" "${PROMPTS_DIR:-/prompts}/worker.md")
     prompt="${SECURITY_NOTICE}${prompt}"
+    [[ -n "${EXTRA_GUIDANCE:-}" ]] && prompt="${prompt}
+
+---
+
+## Additional Guidance from Harness
+
+${EXTRA_GUIDANCE}"
 
     local iteration=0
     local rate_limit_attempts=0

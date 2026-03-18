@@ -172,11 +172,18 @@ When you do review:
 - Rate-limit backoff in progress → don't respawn, workers handle this internally
 - Multiple tasks building the same binary → inform the user, suggest consolidation
 
+**Situational guidance via `EXTRA_GUIDANCE` →** All agent containers support an optional `EXTRA_GUIDANCE` env var. When set, its contents are appended to the agent's prompt under a "## Additional Guidance from Harness" section. Use this to inject context-specific instructions without modifying the base prompt files. Examples:
+- Worker failing repeatedly on a task → respawn with `EXTRA_GUIDANCE="Task 007 failed twice. The error was: <paste from log>. Try a different approach."`
+- Reviewer should focus on a known problem area → `EXTRA_GUIDANCE="Recent failures involved database migrations. Pay extra attention to schema changes."`
+- Orchestrator augmenting after test failures → `EXTRA_GUIDANCE="Tests are failing on auth middleware. Prioritize fix tasks for src/auth/."`
+
+The base prompts are the constitution. `EXTRA_GUIDANCE` is your situational briefing.
+
 ---
 
 ## Docker Commands
 
-All containers use the `swarm-agent` image. Replace `<vars>` with values from `swarm-setup.sh` output and `harness-state.json`.
+All containers use the `swarm-agent` image. Replace `<vars>` with values from `swarm-setup.sh` output and `harness-state.json`. Any container can optionally include `-e EXTRA_GUIDANCE="..."` to append situational instructions to the agent's prompt.
 
 ### Orchestrator
 ```bash
