@@ -44,7 +44,7 @@ When the user asks you to run swarm for a project:
 
 7. **Write initial `harness-state.json`** (see State File below).
 
-8. **Start monitoring:** Tell the user you're starting the monitoring loop, then invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below).
+8. **Start monitoring immediately** — invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
 
 ---
 
@@ -71,7 +71,9 @@ When the user says "resume" or points to an existing output directory:
    git push origin main
    ```
 
-4. **Spawn workers** if pending > 0. Resume monitoring via `/loop 1m`.
+4. **Spawn workers** if pending > 0.
+
+5. **Start monitoring immediately** — invoke `/loop 1m`. **Do not skip this.** Even if you're waiting for an orchestrator to finish, the loop handles everything from there.
 
 ---
 
