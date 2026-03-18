@@ -147,7 +147,7 @@ Apply these in order each cycle. Use judgment — these are guidelines, not rigi
 - Respawn the worker
 - Log the decision in the state file
 
-**Periodic specialist sweep →** Every 6 new completions since the last sweep (tracked in state file as `last_sweep_at_done_count`):
+**Periodic specialist sweep →** Use your judgment on when to run, based on project size and complexity. Guideline: every 5–10 completions is typical, but a 50-task project with independent tasks needs fewer sweeps than a 10-task project with tight coupling. Track in state file as `last_sweep_at_done_count`.
 - Run all specialists except ProjectManager in parallel (background docker containers, wait for all)
 - Then run ProjectManager solo to consolidate
 - Sync main after
@@ -283,7 +283,7 @@ Always run ProjectManager last (after all others complete).
 **Fields:**
 - `reviewed`: task filenames that have been through a reviewer. Only review tasks not in this list.
 - `review_count`: incrementing counter for reviewer container naming.
-- `last_sweep_at_done_count`: done count when the last periodic specialist sweep ran. Trigger next sweep when `current_done >= last_sweep_at_done_count + 6`.
+- `last_sweep_at_done_count`: done count when the last periodic specialist sweep ran. Use to decide when the next sweep is warranted.
 - `specialist_sweep_count`: incrementing counter for specialist container naming.
 - `decisions`: log of adaptive decisions for debugging and post-mortem.
 
