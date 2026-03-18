@@ -18,6 +18,21 @@ if [[ -n "${MODEL:-}" ]]; then
     CLAUDE_MODEL_FLAG="--model $MODEL"
 fi
 
+# Timeout for git operations in seconds (default 30s).
+# Covers clone/pull/push — prevents hung network or filesystem ops.
+GIT_TIMEOUT="${GIT_TIMEOUT:-30}"
+
+# Wrapper for git operations with timeout.
+# Uses GNU timeout when available (Docker/Linux), falls back to plain git (macOS).
+# Usage: git_t <git-args...>
+git_t() {
+    if command -v timeout &>/dev/null; then
+        timeout "$GIT_TIMEOUT" git "$@"
+    else
+        git "$@"
+    fi
+}
+
 # Max log file size in bytes (default 10MB). Truncates from the front,
 # keeping the most recent output. Set MAX_LOG_SIZE=0 to disable.
 MAX_LOG_SIZE="${MAX_LOG_SIZE:-10485760}"
@@ -120,7 +135,7 @@ run_orchestrator() {
     echo "=== Orchestrator started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+    if ! git_t clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
         echo "FATAL: git clone failed" >> "$log_file"
         exit 2
     fi
@@ -162,7 +177,7 @@ run_reviewer() {
     echo "=== Reviewer ${review_num} started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+    if ! git_t clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
         echo "FATAL: git clone failed" >> "$log_file"
         exit 2
     fi
@@ -200,7 +215,7 @@ run_specialist() {
     echo "=== Specialist ${specialist_name} (${specialist_num}) started $(date) ===" > "$log_file"
 
     # Clone bare repo
-    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+    if ! git_t clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
         echo "FATAL: git clone failed" >> "$log_file"
         exit 2
     fi
@@ -254,7 +269,7 @@ run_worker() {
     echo "=== Worker $agent_id started $(date) ===" > "$log_file"
 
     # Clone bare repo — fail fast if clone fails (prevents infinite respawn loops)
-    if ! git clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
+    if ! git_t clone "${UPSTREAM_DIR:-/upstream}" "${WORKSPACE_DIR:-/workspace}" -q 2>>"$log_file"; then
         echo "FATAL: git clone failed — exiting to prevent respawn loop" >> "$log_file"
         echo "=== Worker $agent_id CLONE_FAILED at $(date) ===" >> "$log_file"
         exit 2
@@ -274,7 +289,7 @@ run_worker() {
 
     while true; do
         # Pull latest state
-        git pull origin main -q 2>>"$log_file" || true
+        git_t pull origin main -q 2>>"$log_file" || true
 
         # Count work available
         local pending own_active all_active

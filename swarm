@@ -32,7 +32,6 @@ MODEL=""
 REMOTE_REPO=""  # GitHub URL — if set, repo.git mirrors to this remote
 SWARM_NO_SWEEP=false  # Skip pre-flight and post-augment specialist sweeps
 DOCKER_MEMORY=""  # Docker container memory limit (e.g. "4g") — empty means no limit
-SWARM_MAX_TIME=0  # Wall-clock limit for entire run in seconds (0 = no limit)
 GIT_TIMEOUT=30    # Timeout for git network operations in seconds
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
@@ -58,7 +57,6 @@ Options:
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   --no-sweep            Skip pre-flight and post-augment specialist sweeps (keeps periodic)
   --memory LIMIT        Docker container memory limit, e.g. "4g" (default: no limit)
-  --max-time SECONDS    Wall-clock limit for entire run in seconds (default: no limit)
   -h, --help            Show this help
 
 Subcommands:
@@ -819,23 +817,8 @@ run_with_review() {
     local max_stuck_cycles=3
     local last_restructure_at=0
     local restructure_interval="${RESTRUCTURE_INTERVAL:-6}"
-    local start_time
-    start_time=$(date +%s)
-
-    if [[ "$SWARM_MAX_TIME" -gt 0 ]]; then
-        log "Max time: ${SWARM_MAX_TIME}s"
-    fi
 
     while [[ "$all_complete" == "false" ]]; do
-        # Check wall-clock timeout
-        if [[ "$SWARM_MAX_TIME" -gt 0 ]]; then
-            local elapsed=$(( $(date +%s) - start_time ))
-            if [[ "$elapsed" -ge "$SWARM_MAX_TIME" ]]; then
-                warn "Max time (${SWARM_MAX_TIME}s) reached after ${elapsed}s — stopping"
-                all_complete=true
-                break
-            fi
-        fi
         sleep 5
         sync_main
 
@@ -1167,7 +1150,6 @@ main() {
             [[ -z "$REMOTE_REPO" && -n "${SWARM_REPO:-}" ]] && REMOTE_REPO="$SWARM_REPO"
             [[ "$SWARM_NO_SWEEP" == "false" && "${SWARM_NO_SWEEP:-false}" == "true" ]] && SWARM_NO_SWEEP=true
             [[ -z "$DOCKER_MEMORY" && -n "${SWARM_DOCKER_MEMORY:-}" ]] && DOCKER_MEMORY="$SWARM_DOCKER_MEMORY"
-            [[ "$SWARM_MAX_TIME" -eq 0 && -n "${SWARM_MAX_TIME_VAL:-}" && "${SWARM_MAX_TIME_VAL:-0}" -gt 0 ]] && SWARM_MAX_TIME="$SWARM_MAX_TIME_VAL"
         fi
     fi
 
@@ -1307,7 +1289,6 @@ main() {
             printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
             printf 'SWARM_NO_SWEEP=%s\n' "$SWARM_NO_SWEEP"
             printf 'SWARM_DOCKER_MEMORY=%q\n' "$DOCKER_MEMORY"
-            printf 'SWARM_MAX_TIME_VAL=%s\n' "$SWARM_MAX_TIME"
             printf 'SWARM_STARTED="%s"\n' "$(date)"
         } > "$OUTPUT_DIR/swarm.state"
 
@@ -1409,7 +1390,7 @@ while [[ $# -gt 0 ]]; do
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         --no-sweep)         SWARM_NO_SWEEP=true; shift ;;
         --memory)           DOCKER_MEMORY="$2"; shift 2 ;;
-        --max-time)         SWARM_MAX_TIME="$2"; shift 2 ;;
+
         -h|--help)      usage; exit 0 ;;
         -*)             error "Unknown option: $1"; usage; exit 1 ;;
         *)              TASK="${TASK:+$TASK }$1"; shift ;;

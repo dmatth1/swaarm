@@ -155,6 +155,8 @@ load_swarm() {
     VERBOSE=false
     MAX_WORKER_ITERATIONS=100
     DOCKER_IMAGE="swarm-agent"
+    DOCKER_MEMORY=""
+    GIT_TIMEOUT=30
     RUN_ID="test-$$"
     SCRIPT_DIR="$(cd "$TESTS_DIR/.." && pwd)"
     PROMPTS_DIR="$SCRIPT_DIR/prompts"

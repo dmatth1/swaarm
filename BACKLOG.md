@@ -26,17 +26,12 @@ No visibility into API token spend per run.
 - [ ] Capture token usage from stream-json `result` events in `stream_parse.py`
 - [ ] Aggregate and report totals at run completion
 
-### Timeouts on git operations
-No timeouts on git calls. Hung network blocks the worker forever.
-- [ ] Timeout wrappers around git operations (10-30s)
+### Timeouts on git operations — **Done**
+- [x] `git_t()` wrapper in entrypoint.sh (timeout 30s, fallback on macOS)
+- [x] `http.lowSpeedLimit`/`http.lowSpeedTime` for network git ops in swarm
 
-### Docker memory limits
-No memory limits on worker containers. OOM-inducing code can take down the host.
-- [ ] Add `--memory` flag to docker run calls (configurable, default 4G)
-
-### `run_with_review()` total timeout
-Review loop runs indefinitely. No safety valve.
-- [ ] Add optional `--timeout` flag for max wall-clock time
+### Docker memory limits — **Done**
+- [x] `--memory LIMIT` flag on all docker run calls (configurable, no default limit)
 
 ### Parallelize Docker-dependent tests
 `test_cleanup.sh`, `test_dead_worker.sh`, and `test_kill.sh` run sequentially (shared container namespaces).

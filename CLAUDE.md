@@ -98,11 +98,14 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 - **Specialists audit-only**: specialists do not write code, run builds, or run tests. They audit the codebase through their domain lens and create tasks in `tasks/pending/` for issues found. Trivial one-line fixes (typos, comments) are OK. All real work goes through the worker→review quality gate.
 - **Parallel specialist sweeps**: all specialists in a sweep launch concurrently (background `&` + `wait`); each gets its own container/clone; push conflicts handled by rebase in specialist prompt
 - **Remote repo mirroring** (`--repo URL`): local bare repo stays the fast coordination hub; harness pushes to GitHub after each `sync_main`. When set, `PUBLIC_REPO=true` env var triggers a security notice in all agent prompts prohibiting secrets/PII commits
+- **Git operation timeouts**: `git_t()` wrapper in `entrypoint.sh` wraps `git clone/pull/push` with `timeout $GIT_TIMEOUT` (default 30s) in Docker. Falls back to plain `git` on macOS. Network git ops in `swarm` use `http.lowSpeedLimit`/`http.lowSpeedTime` instead
+- **Docker memory limits**: `--memory LIMIT` flag (e.g. `--memory 4g`) adds `--memory` to all `docker run` calls. Prevents OOM-inducing code from taking down the host. No limit by default
+
 
 ## Subcommands
 
 ```bash
-./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--mount HOST:CONTAINER] [--no-sweep] [--verbose]
+./swarm "<prompt>" [-o DIR] [-n N] [--model M] [--repo URL] [--mount HOST:CONTAINER] [--no-sweep] [--memory LIMIT] [--verbose]
 # If -o points to existing run → resume (unstick tasks, augment via orchestrator if new guidance, re-spawn workers)
 # If -o absent or new dir → new run (orchestrate + workers)
 ./swarm status <output-dir>
@@ -111,7 +114,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 ./swarm cleanup [output-dir]             # remove orphaned containers
 ```
 
-`swarm.state` (written at init) stores `SWARM_TASK`, `SWARM_AGENTS`, `SWARM_MODEL`, `SWARM_REPO` for resume.
+`swarm.state` (written at init) stores `SWARM_TASK`, `SWARM_AGENTS`, `SWARM_MODEL`, `SWARM_REPO`, `SWARM_DOCKER_MEMORY` for resume.
 
 ## Monitoring a Run
 
@@ -156,6 +159,7 @@ Key test files:
 - `test_unified_command.sh` — New run vs resume detection, orchestrator augment, state restore
 - `test_kill.sh` — Kill specific/all workers, missing pids dir, already-stopped containers
 - `test_remote_repo.sh` — GitHub remote setup, sync_remote push, PUBLIC_REPO security notice
+- `test_timeouts_and_limits.sh` — Git operation timeouts, Docker memory limits
 
 ## Development Cleanup
 
