@@ -815,7 +815,12 @@ run_with_review() {
     local all_complete=false
     local stuck_cycles=0
     local max_stuck_cycles=3
+    # On resume (reviewed list has entries), start at current done count to avoid
+    # immediately firing the periodic orchestrator. On fresh runs, start at 0.
     local last_restructure_at=0
+    if [[ ${#reviewed[@]} -gt 0 ]]; then
+        last_restructure_at=$(done_count)
+    fi
     local restructure_interval="${RESTRUCTURE_INTERVAL:-6}"
 
     while [[ "$all_complete" == "false" ]]; do
