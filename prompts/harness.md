@@ -156,9 +156,11 @@ When you do review:
 - Log the decision in the state file
 
 **Periodic specialist sweep →** Use your judgment on when to run, based on project size and complexity. Guideline: every 5–10 completions is typical, but a 50-task project with independent tasks needs fewer sweeps than a 10-task project with tight coupling. Track in state file as `last_sweep_at_done_count`.
+- **Stop all workers before the sweep** — specialists and PM need a stable codebase to audit. Kill worker containers or wait for them to finish their current tasks.
 - Run all specialists except ProjectManager in parallel (background docker containers, wait for all)
-- Then run ProjectManager solo to consolidate
+- Then run ProjectManager solo to consolidate (PM deduplicates, removes scope creep, and renumbers — workers must not claim tasks until PM finishes)
 - Sync main after
+- **Only then** spawn workers for any new/remaining tasks
 
 **Final drain →** When pending = 0, active = 0, and no reviewers are still running — **act immediately, do not ask the user:**
 1. Run final specialist sweep (all specialists parallel, then PM solo). **This is mandatory, not optional.**
