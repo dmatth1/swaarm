@@ -164,9 +164,17 @@ When you do review:
 - If `TESTS_PASS`: declare run complete, stop monitoring
 - If `TESTS_FAIL`: run orchestrator to add fix tasks, continue monitoring
 
+**Model selection →** You don't have to use the same model for every agent. Pick the model based on the role and task complexity:
+- **Orchestrator**: use the strongest available model — task decomposition and architecture decisions have the highest leverage. A bad plan wastes every worker's effort.
+- **Workers**: read the task file before spawning. Simple tasks (rename files, update configs, write boilerplate) can use a lighter model. Complex tasks (architecture changes, tricky algorithms, multi-file refactors) should use the strongest model.
+- **Reviewers**: can typically use a lighter model — they run tests and report pass/fail.
+- **Specialists**: use a mid-tier model — they audit and create tasks but don't write production code.
+
+When the user specifies a model, treat it as the default. You can downshift for simpler work to save tokens and reduce rate-limit pressure, but never upshift beyond what the user requested. Log model choices in the state file's `decisions` array so the user can see what was used.
+
 **Adaptive decisions (use your judgment, informed by logs from Step 5):**
 - Workers OOMing/killed → reduce worker count or increase `--memory` flag
-- Workers hitting 529/overload → inform the user, suggest switching model
+- Workers hitting 529/overload → try respawning with a lighter model before informing the user
 - Worker log shows no output for 3+ cycles → container may be hung despite showing "Up" in docker ps; restart it
 - Worker log shows repeated errors on same task → read the full log (`tail -200`), run orchestrator to decompose the task
 - Rate-limit backoff in progress → don't respawn, workers handle this internally
