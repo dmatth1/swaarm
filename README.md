@@ -58,7 +58,7 @@ You: "Run swarm for a todo REST API with 3 agents"
   Your project, complete in main/
 ```
 
-Between workers and completion, the **harness agent** validates each task via a reviewer container (runs tests, checks artifacts). Periodically (the harness decides when, based on project size and complexity), a specialist sweep audits the codebase (code quality, reliability, test coverage, performance, documentation). ProjectManager runs last to consolidate specialist findings.
+Between workers and completion, the **harness agent** adaptively reviews tasks (deciding when based on resource pressure and pass/fail history), runs specialist sweeps when the project warrants it, and picks models per-role. ProjectManager runs last to consolidate specialist findings.
 
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 
@@ -91,8 +91,8 @@ The harness reads `prompts/harness.md` for operating instructions and manages ev
 ### Parameters
 
 When starting a run, you can specify:
-- **Number of agents** (default 3)
-- **Model** (default sonnet, e.g. "opus", "opus[1m]", "haiku")
+- **Number of agents** (default 3 — this is a maximum; the harness scales dynamically based on available parallelism)
+- **Model** (default sonnet, e.g. "opus", "opus[1m]", "haiku" — harness may downshift for simpler tasks)
 - **Output directory** (default swarm-TIMESTAMP)
 - **Remote repo** (optional GitHub URL for mirroring)
 - **Extra mounts** (optional, e.g. reference docs)
@@ -182,7 +182,7 @@ They solve different problems:
 | **Agent isolation** | Shared filesystem (must avoid file conflicts) | Each agent in its own Docker container |
 | **Crash recovery** | Manual (teammates may stop on errors) | Automatic (detect dead containers, unstick tasks, respawn) |
 | **Rate limits** | No built-in handling | Exponential backoff, keep task claimed |
-| **Quality gates** | Manual (prompt teammates to test) | Automated reviewer after every completion |
+| **Quality gates** | Manual (prompt teammates to test) | Adaptive reviewer + final drain full test suite |
 | **Long-running** | "Letting a team run unattended increases risk" | Designed for hours/days unattended |
 | **Session resume** | Broken (teammates lost on `/resume`) | Works (harness re-reads git + state file) |
 | **Communication** | Agents talk to each other | Agents are fully isolated — state is in git |

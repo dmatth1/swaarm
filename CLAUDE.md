@@ -82,9 +82,12 @@ Workers have passwordless sudo — they can `sudo apt-get install` packages as n
 
 ## Key Design Decisions
 
-- **Agent harness**: Claude Code manages the run via `/loop` — reads git + docker state each cycle, makes adaptive decisions. No bash state machine. See `prompts/harness.md`.
-- **Ground truth is git + docker**: task state from `tasks/*/`, worker health from `docker ps`. `harness-state.json` tracks agent decisions (reviewed list, sweep counts) across context compactions.
-- **CLAUDE.md as project index**: orchestrator creates it; workers get it auto-loaded. Kept under 200 lines. Orientation here, contracts in SPEC.md.
+- **Agent harness**: Claude Code manages the run via `/loop` — reads git + docker + logs each cycle, makes adaptive decisions. No bash state machine. See `prompts/harness.md`.
+- **Ground truth is git + docker + logs**: task state from `tasks/*/`, worker health from `docker ps`, problems from `tail` of agent logs. `harness-state.json` tracks decisions across context compactions.
+- **Adaptive reviews**: harness decides when to run reviewers based on resource pressure, pass/fail track record, and task criticality. Final drain always runs a full test suite.
+- **Per-role model selection**: harness can use different models per agent type and task complexity. User's model is the ceiling — harness can downshift for simple work.
+- **Dynamic worker count**: user's requested count is a maximum. Harness scales workers to match available parallelism, rate-limit pressure, and remaining task dependencies.
+- **`EXTRA_GUIDANCE` env var**: harness injects situational context into any agent's prompt without modifying base prompt files. Used for failure recovery hints, focus areas, prior error context.
 - **Stateless worker invocations**: each `claude` call re-reads everything from git. State is only in the repo.
 - **Rate-limit backoff**: workers detect 429/"too many requests" and sleep with exponential backoff (5m→4hr ±20% jitter)
 - **Invocation timeout**: `run_claude()` wraps `claude` with `timeout $CLAUDE_TIMEOUT` (default 30m). Kills hung invocations.
