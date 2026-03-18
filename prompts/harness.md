@@ -160,13 +160,14 @@ When you do review:
 - Then run ProjectManager solo to consolidate
 - Sync main after
 
-**Final drain →** When pending = 0, active = 0, and no reviewers are still running:
-- Run final specialist sweep (all specialists parallel, then PM solo)
-- Sync main and re-check pending count — if specialists created new tasks, spawn workers and continue monitoring (do **not** stop or ask the user)
-- If still pending = 0: run final reviewer with `COMPLETED_TASK=--final--`
-- If `TESTS_PASS`: declare run complete, stop monitoring
-- If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring
-- **Keep going until the project is truly done.** Don't pause to ask the user whether to continue — if there's pending work, do it.
+**Final drain →** When pending = 0, active = 0, and no reviewers are still running — **act immediately, do not ask the user:**
+1. Run final specialist sweep (all specialists parallel, then PM solo). **This is mandatory, not optional.**
+2. Sync main and re-check pending count — if specialists created new tasks, spawn workers and continue monitoring
+3. If still pending = 0: run final reviewer with `COMPLETED_TASK=--final--`
+4. If `TESTS_PASS`: declare run complete, stop monitoring
+5. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring
+
+**Never ask the user "should I run a sweep?" or "should I continue?" — just do it.** The run is not done until the final reviewer passes with no pending tasks.
 
 **Worker count →** The user's requested worker count is a **maximum**, not a fixed number. Adjust dynamically based on conditions:
 - **At launch**: read the task files after orchestration. If there are only 4 pending tasks, don't spawn 5 workers — one will just idle. Match workers to available parallelism (tasks without unsatisfied dependencies).
