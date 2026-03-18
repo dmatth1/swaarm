@@ -289,9 +289,9 @@ NUM_AGENTS=1
 
 main 2>/dev/null || true
 
-[[ "$RWR_CALLED" == "false" ]] \
-    && pass "run_with_review NOT called when all tasks done" \
-    || fail "run_with_review should not be called when nothing to do"
+[[ "$RWR_CALLED" == "true" ]] \
+    && pass "run_with_review called for final drain when all tasks done" \
+    || fail "run_with_review should be called for final drain even when all tasks done"
 
 teardown_test
 trap - EXIT

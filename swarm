@@ -31,6 +31,9 @@ DOCKER_IMAGE="swarm-agent"
 MODEL=""
 REMOTE_REPO=""  # GitHub URL — if set, repo.git mirrors to this remote
 SWARM_NO_SWEEP=false  # Skip pre-flight and post-augment specialist sweeps
+DOCKER_MEMORY=""  # Docker container memory limit (e.g. "4g") — empty means no limit
+SWARM_MAX_TIME=0  # Wall-clock limit for entire run in seconds (0 = no limit)
+GIT_TIMEOUT=30    # Timeout for git network operations in seconds
 RUN_ID=""
 EXTRA_MOUNTS=()  # additional -v host:container mounts passed to every container
 
@@ -54,6 +57,8 @@ Options:
   --mount HOST:CONTAINER  Mount additional host directory into every container (repeatable)
   --max-iterations N    Max Claude invocations per worker, excluding waits (default: 100)
   --no-sweep            Skip pre-flight and post-augment specialist sweeps (keeps periodic)
+  --memory LIMIT        Docker container memory limit, e.g. "4g" (default: no limit)
+  --max-time SECONDS    Wall-clock limit for entire run in seconds (default: no limit)
   -h, --help            Show this help
 
 Subcommands:
@@ -487,6 +492,7 @@ docker_run_orchestrator() {
 
     docker run --rm \
         --name "$container_name" \
+        ${DOCKER_MEMORY:+--memory "$DOCKER_MEMORY"} \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
@@ -543,6 +549,7 @@ docker_run_worker() {
     docker run -d \
         "${extra_flags[@]+"${extra_flags[@]}"}" \
         --name "$container_name" \
+        ${DOCKER_MEMORY:+--memory "$DOCKER_MEMORY"} \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
@@ -583,6 +590,7 @@ docker_run_reviewer() {
 
     docker run --rm \
         --name "$container_name" \
+        ${DOCKER_MEMORY:+--memory "$DOCKER_MEMORY"} \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
@@ -625,6 +633,7 @@ docker_run_specialist() {
 
     docker run --rm \
         --name "$container_name" \
+        ${DOCKER_MEMORY:+--memory "$DOCKER_MEMORY"} \
         -v "$REPO_DIR:/upstream" \
         -v "$LOGS_DIR:/logs" \
         -v "$PROMPTS_DIR:/prompts:ro" \
@@ -810,8 +819,23 @@ run_with_review() {
     local max_stuck_cycles=3
     local last_restructure_at=0
     local restructure_interval="${RESTRUCTURE_INTERVAL:-6}"
+    local start_time
+    start_time=$(date +%s)
+
+    if [[ "$SWARM_MAX_TIME" -gt 0 ]]; then
+        log "Max time: ${SWARM_MAX_TIME}s"
+    fi
 
     while [[ "$all_complete" == "false" ]]; do
+        # Check wall-clock timeout
+        if [[ "$SWARM_MAX_TIME" -gt 0 ]]; then
+            local elapsed=$(( $(date +%s) - start_time ))
+            if [[ "$elapsed" -ge "$SWARM_MAX_TIME" ]]; then
+                warn "Max time (${SWARM_MAX_TIME}s) reached after ${elapsed}s — stopping"
+                all_complete=true
+                break
+            fi
+        fi
         sleep 5
         sync_main
 
@@ -1009,7 +1033,7 @@ sync_main() {
 # Push local bare repo to remote GitHub repo (no-op if --repo not set)
 sync_remote() {
     [[ -z "$REMOTE_REPO" ]] && return 0
-    (cd "$REPO_DIR" && git push github --all -q) 2>/dev/null || warn "sync_remote: git push to github failed"
+    (cd "$REPO_DIR" && git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime="$GIT_TIMEOUT" push github --all -q) 2>/dev/null || warn "sync_remote: git push to github failed"
 }
 
 pending_count() { count_files "$MAIN_DIR/tasks/pending"; }
@@ -1027,7 +1051,7 @@ init_workspace() {
     if [[ -n "$REMOTE_REPO" ]]; then
         # Clone remote repo as local bare mirror for fast coordination
         log "Cloning remote repo: $REMOTE_REPO"
-        git clone --bare "$REMOTE_REPO" "$REPO_DIR" -q 2>/dev/null || {
+        git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime="$GIT_TIMEOUT" clone --bare "$REMOTE_REPO" "$REPO_DIR" -q 2>/dev/null || {
             # Remote may be empty — init locally and add remote
             mkdir -p "$REPO_DIR"
             git init --bare "$REPO_DIR" -q
@@ -1142,6 +1166,8 @@ main() {
             [[ -z "$MODEL" && -n "${SWARM_MODEL:-}" ]] && MODEL="$SWARM_MODEL"
             [[ -z "$REMOTE_REPO" && -n "${SWARM_REPO:-}" ]] && REMOTE_REPO="$SWARM_REPO"
             [[ "$SWARM_NO_SWEEP" == "false" && "${SWARM_NO_SWEEP:-false}" == "true" ]] && SWARM_NO_SWEEP=true
+            [[ -z "$DOCKER_MEMORY" && -n "${SWARM_DOCKER_MEMORY:-}" ]] && DOCKER_MEMORY="$SWARM_DOCKER_MEMORY"
+            [[ "$SWARM_MAX_TIME" -eq 0 && -n "${SWARM_MAX_TIME_VAL:-}" && "${SWARM_MAX_TIME_VAL:-0}" -gt 0 ]] && SWARM_MAX_TIME="$SWARM_MAX_TIME_VAL"
         fi
     fi
 
@@ -1252,12 +1278,20 @@ main() {
         done_n=$(done_count)
 
         if [[ "$pending" -eq 0 ]]; then
-            success "Nothing to do — all tasks already complete ($done_n done)"
-            echo
-            return 0
+            local active_n
+            active_n=$(active_count)
+            if [[ "$active_n" -eq 0 ]]; then
+                success "All tasks complete ($done_n done) — running final review and sweep"
+                echo
+                # Still enter run_with_review so the final drain runs
+                # (final test review + specialist sweep)
+            else
+                success "$active_n task(s) still active, $done_n done — spawning $NUM_AGENTS worker(s)"
+                echo
+            fi
+        else
+            success "$pending task(s) pending, $done_n done — spawning $NUM_AGENTS worker(s)"
         fi
-
-        success "$pending task(s) pending, $done_n done — spawning $NUM_AGENTS worker(s)"
         echo
     else
         # ── NEW RUN: init workspace, orchestrate, pre-flight sweep ──
@@ -1272,6 +1306,8 @@ main() {
             printf 'SWARM_MODEL=%q\n' "$MODEL"
             printf 'SWARM_REPO=%q\n' "$REMOTE_REPO"
             printf 'SWARM_NO_SWEEP=%s\n' "$SWARM_NO_SWEEP"
+            printf 'SWARM_DOCKER_MEMORY=%q\n' "$DOCKER_MEMORY"
+            printf 'SWARM_MAX_TIME_VAL=%s\n' "$SWARM_MAX_TIME"
             printf 'SWARM_STARTED="%s"\n' "$(date)"
         } > "$OUTPUT_DIR/swarm.state"
 
@@ -1372,6 +1408,8 @@ while [[ $# -gt 0 ]]; do
         --mount)            EXTRA_MOUNTS+=("$2"); shift 2 ;;
         --max-iterations)   MAX_WORKER_ITERATIONS="$2"; shift 2 ;;
         --no-sweep)         SWARM_NO_SWEEP=true; shift ;;
+        --memory)           DOCKER_MEMORY="$2"; shift 2 ;;
+        --max-time)         SWARM_MAX_TIME="$2"; shift 2 ;;
         -h|--help)      usage; exit 0 ;;
         -*)             error "Unknown option: $1"; usage; exit 1 ;;
         *)              TASK="${TASK:+$TASK }$1"; shift ;;
