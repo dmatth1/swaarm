@@ -6,11 +6,13 @@
 
 ```
 swarm                    ← Main CLI script
-Dockerfile               ← Container image (node + python + go + claude CLI)
-docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker modes)
+Dockerfile               ← Container image (node + python + go + claude CLI + sudo)
+docker/entrypoint.sh     ← Container entrypoint (orchestrator/worker/reviewer/specialist)
+docker/stream_parse.py   ← Parses stream-json from claude CLI into log + output file
 prompts/orchestrator.md  ← Orchestrator prompt template (new + augment modes)
 prompts/worker.md        ← Worker prompt template
 prompts/reviewer.md      ← Reviewer agent prompt template
+prompts/specialist.md    ← Specialist prompt template (audit-only, creates tasks)
 prompts/task-format.md   ← Shared task creation guide (appended to all task-creating agents)
 BACKLOG.md               ← Known bugs, missing tests, and planned features
 ```
@@ -66,6 +68,7 @@ swarm-TIMESTAMP/
 | `<promise>ORCHESTRATION COMPLETE</promise>` | Orchestrator | Task files created |
 | `<promise>TESTS_PASS</promise>` | Reviewer | Tests passing |
 | `<promise>TESTS_FAIL</promise>` | Reviewer | Tests failing, orchestrator triggered |
+| `<promise>SPECIALIST_DONE</promise>` | Specialist | Audit complete, tasks created |
 
 **Stuck-state detection**: after 3 consecutive idle cycles with pending tasks and no active workers, the harness triggers the orchestrator in augment mode. The orchestrator diagnoses deadlocks (circular dependencies or missing prerequisite tasks) and adds resolution tasks.
 
@@ -76,7 +79,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 - Orchestrator: `docker run --rm` (foreground, exits when done)
 - Workers: `docker run -d`, tracked via `pids/worker-N.cid`
 
-**Worker container lifecycle**: each worker container is long-lived — it clones `/upstream` into `/workspace` once at startup, then loops: pull → claim task → run claude → complete → repeat. The container persists across multiple tasks. Non-git state (installed packages, build artifacts) accumulates in `/workspace` across tasks on the same worker; this is intentional as later tasks typically depend on setup done by earlier ones. All canonical project state is in git.
+**Worker container lifecycle**: each worker container is long-lived — it clones `/upstream` into `/workspace` once at startup, then loops: pull → claim task → run claude → complete → repeat. The container persists across multiple tasks. Non-git state (installed packages, build artifacts) accumulates in `/workspace` across tasks on the same worker; this is intentional as later tasks typically depend on setup done by earlier ones. All canonical project state is in git. Workers have passwordless sudo — they can `sudo apt-get install` packages needed by the project (e.g. xvfb, imagemagick).
 
 **When to rebuild the image**: prompts (`prompts/*.md`) and the `swarm` script are mounted or run on the host — no rebuild needed. **Rebuild when `Dockerfile` or `docker/entrypoint.sh` change**: `docker rmi swarm-agent && ./swarm ...` (auto-rebuilds on next run).
 
@@ -92,6 +95,7 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 - **Log rotation**: `truncate_log()` caps log files at `MAX_LOG_SIZE` (default 10MB) after each `run_claude()` call; keeps the tail (most recent output), prepends a marker; disable with `MAX_LOG_SIZE=0`
 - **Respawn cap**: dead workers are automatically respawned up to `MAX_RESPAWNS` (default 5) times; counter resets when any task completes; prevents infinite loops on persistent failures (e.g., corrupt repo, disk full)
 - **Periodic orchestrator**: every N task completions (default 6, configurable via `RESTRUCTURE_INTERVAL`), the orchestrator runs in augment mode alongside a specialist sweep — reviews/fixes pending tasks, updates CLAUDE.md/SPEC.md, handles BLOCKED tasks, and adds tasks for test failures or gaps. Runs concurrently with workers; git conflicts handled by normal rebase/retry
+- **Specialists audit-only**: specialists do not write code, run builds, or run tests. They audit the codebase through their domain lens and create tasks in `tasks/pending/` for issues found. Trivial one-line fixes (typos, comments) are OK. All real work goes through the worker→review quality gate.
 - **Parallel specialist sweeps**: all specialists in a sweep launch concurrently (background `&` + `wait`); each gets its own container/clone; push conflicts handled by rebase in specialist prompt
 - **Remote repo mirroring** (`--repo URL`): local bare repo stays the fast coordination hub; harness pushes to GitHub after each `sync_main`. When set, `PUBLIC_REPO=true` env var triggers a security notice in all agent prompts prohibiting secrets/PII commits
 
@@ -147,9 +151,11 @@ Tests mock the Claude CLI (no API tokens). E2E tests (`test_e2e.sh`) use a mock 
 
 Key test files:
 - `test_e2e.sh` — Full lifecycle, crash recovery, resume, specialist sweeps, rate limit, log streaming
-- `test_reviewer_loop.sh` — Review loop: TESTS_PASS/TESTS_FAIL signals, stuck detection via orchestrator, blocked task handling, specialist parallel execution
-- `test_quiet_periods.sh` — Periodic restructuring: orchestrator triggered at interval, RESTRUCTURE_INTERVAL configurable, TESTS_FAIL triggers orchestrator
+- `test_reviewer_loop.sh` — Review loop: TESTS_PASS/TESTS_FAIL signals, stuck detection, blocked tasks, specialist parallel execution, respawn cap
+- `test_quiet_periods.sh` — Periodic restructuring: orchestrator at interval, TESTS_FAIL triggers orchestrator, artifact compliance
 - `test_unified_command.sh` — New run vs resume detection, orchestrator augment, state restore
+- `test_kill.sh` — Kill specific/all workers, missing pids dir, already-stopped containers
+- `test_remote_repo.sh` — GitHub remote setup, sync_remote push, PUBLIC_REPO security notice
 
 ## Development Cleanup
 
