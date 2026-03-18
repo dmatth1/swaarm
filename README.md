@@ -192,6 +192,17 @@ They solve different problems:
 
 **Use Swarm** when you need to build — structured task decomposition, crash recovery, quality gates, overnight autonomy.
 
+## vs. the Anthropic blog post
+
+Swarm's git coordination model comes directly from [Anthropic's multi-agent C compiler experiment](https://www.anthropic.com/engineering/building-c-compiler):
+
+- Bare git repo as the shared coordination hub
+- Each agent in its own Docker container with isolated `/workspace`
+- Git's atomic push as the distributed lock
+- Stateless agent invocations (each Claude session reads the repo fresh)
+
+**What swarm adds:** a 3-state task machine (`pending/` → `active/` → `done/`), a reviewer quality gate, specialist sweeps, and an adaptive agent harness that can reason about failures.
+
 ## Customizing agent behavior
 
 Edit the prompts to change how agents approach tasks:
