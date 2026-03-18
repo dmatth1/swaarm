@@ -2,11 +2,16 @@
 
 ## P2 — Should fix
 
-### Specialists should audit and create tasks, not fix directly
-Specialists currently make direct code changes (refactoring, adding tests, fixing bugs) during sweeps. This causes: merge conflicts with workers running in parallel, bypasses the task→review quality gate, and a hung specialist (e.g. deadlocked JUCE test binary) blocks the entire pipeline before workers start. Observed: AudioDSPSpecialist deadlocked for 52 min on a `build_tests.sh run` tool call, blocking all 5 workers from spawning.
-- [ ] Update all specialist role descriptions in `prompts/orchestrator.md` to audit-only: identify issues, create tasks in `tasks/pending/`, do not write code
-- [ ] Allow small surgical fixes (one-line comments, named constants) but no build/test cycles
-- [ ] Remove "Fix what you find directly" / "Refactor directly" language from specialist prompts
+### Test environment should match production (Docker)
+Tests source `entrypoint.sh` directly on macOS, but production runs inside Docker (Linux). This means code paths like `timeout` need a conditional fallback for macOS, and the actual production code path is never tested.
+- Option A: Run entrypoint-dependent tests inside Docker containers — test env literally is production env
+- Option B: Require GNU coreutils on macOS (`brew install coreutils`) as a dev dependency, remove the conditional fallback
+
+### Specialists should audit and create tasks, not fix directly — **Done**
+- [x] Updated all specialist role descriptions in `prompts/orchestrator.md` to audit-only
+- [x] Updated `prompts/specialist.md` template: Step 4 now creates tasks instead of fixing code
+- [x] Trivial one-line fixes still allowed (typos, comments, constants); no builds/tests
+- [x] Removed "Fix what you find directly" / "Refactor directly" language
 
 ### Timeout on claude CLI invocations — **Done**
 - [x] `run_claude()` wraps `claude` with `timeout $CLAUDE_TIMEOUT` (default 1800s / 30m)
