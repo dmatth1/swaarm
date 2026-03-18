@@ -44,7 +44,7 @@ When the user asks you to run swarm for a project:
 
 7. **Write initial `harness-state.json`** (see State File below).
 
-8. **Start monitoring:** Tell the user you're starting the monitoring loop, then invoke `/loop 30s` with the monitoring prompt (see Monitoring Cycle below).
+8. **Start monitoring:** Tell the user you're starting the monitoring loop, then invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below).
 
 ---
 
@@ -71,7 +71,7 @@ When the user says "resume" or points to an existing output directory:
    git push origin main
    ```
 
-4. **Spawn workers** if pending > 0. Resume monitoring via `/loop 30s`.
+4. **Spawn workers** if pending > 0. Resume monitoring via `/loop 1m`.
 
 ---
 
@@ -101,11 +101,30 @@ ls <main-dir>/tasks/active/ | grep -v .gitkeep | wc -l
 ls <main-dir>/tasks/done/ | grep -v .gitkeep | wc -l
 ```
 
-### Step 5: Make decisions
+### Step 5: Check logs
 
-Compare `tasks/done/` against the `reviewed` list in the state file. Apply the decision logic below. Execute actions. Update the state file.
+Tail recent output from active agents to detect problems that aren't visible from git/docker state alone:
+```bash
+# Worker logs — look for rate-limit, errors, stuck loops
+tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529|too many requests' || true
 
-### Step 6: Push to remote (if configured)
+# Orchestrator/reviewer/specialist logs (if any ran recently)
+tail -30 <logs-dir>/orchestrator.log 2>/dev/null | grep -iE 'error|fatal|failed' || true
+tail -30 <logs-dir>/reviewer-*.log 2>/dev/null | grep -iE 'TESTS_PASS|TESTS_FAIL|error' || true
+tail -30 <logs-dir>/specialist-*.log 2>/dev/null | grep -iE 'error|fatal|failed' || true
+```
+
+Use what you find to inform decisions in the next step. Examples:
+- Rate-limit messages → workers are backing off, don't respawn (they handle it internally)
+- OOM/killed → container needs more memory or task is too large
+- Repeated errors on same task → may need orchestrator to decompose it
+- No recent output in a worker log → worker may be hung despite container running
+
+### Step 6: Make decisions
+
+Compare `tasks/done/` against the `reviewed` list in the state file. Cross-reference with log findings from Step 5. Apply the decision logic below. Execute actions. Update the state file.
+
+### Step 7: Push to remote (if configured)
 ```bash
 cd <repo-dir> && git push github --all -q 2>/dev/null || true
 ```
@@ -139,10 +158,12 @@ Apply these in order each cycle. Use judgment — these are guidelines, not rigi
 - If `TESTS_PASS`: declare run complete, stop monitoring
 - If `TESTS_FAIL`: run orchestrator to add fix tasks, continue monitoring
 
-**Adaptive decisions (use your judgment):**
-- Workers OOMing repeatedly → reduce worker count, increase `--memory` flag
-- Workers hitting 529/overload errors → inform the user, suggest switching model
-- Tasks stuck with no progress for 3+ cycles → read worker logs, diagnose, run orchestrator if deadlocked
+**Adaptive decisions (use your judgment, informed by logs from Step 5):**
+- Workers OOMing/killed → reduce worker count or increase `--memory` flag
+- Workers hitting 529/overload → inform the user, suggest switching model
+- Worker log shows no output for 3+ cycles → container may be hung despite showing "Up" in docker ps; restart it
+- Worker log shows repeated errors on same task → read the full log (`tail -200`), run orchestrator to decompose the task
+- Rate-limit backoff in progress → don't respawn, workers handle this internally
 - Multiple tasks building the same binary → inform the user, suggest consolidation
 
 ---

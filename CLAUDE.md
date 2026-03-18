@@ -38,7 +38,7 @@ Output directory per run:
 
 **Phase 2 — Workers**: long-lived Docker containers that loop: pull → claim task → run claude → complete → repeat. Each worker is stateless per Claude invocation. Git is the coordination mechanism.
 
-**Phase 3 — Monitoring**: Claude Code (you) monitors via `/loop`, checking `docker ps` + git task state every 30s. Reviews completions, runs specialist sweeps periodically, handles failures adaptively.
+**Phase 3 — Monitoring**: Claude Code (you) monitors via `/loop`, checking `docker ps` + git task state every 1m. Reviews completions, runs specialist sweeps periodically, handles failures adaptively.
 
 **Task state machine**: `pending/NNN-task.md` → `active/worker-N--NNN-task.md` → `done/NNN-task.md`
 
