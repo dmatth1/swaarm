@@ -817,6 +817,12 @@ check_and_respawn_dead_workers() {
         running=$(docker inspect --format='{{.State.Running}}' "$cname" 2>/dev/null) || running="gone"
         [[ "$running" == "true" ]] && continue
 
+        log "Worker $i is dead (status: $running) — checking for stuck tasks..."
+
+        # Refresh main view before checking active tasks (worker may have pushed claims
+        # that haven't been pulled yet)
+        sync_main
+
         # Container is not running — check for tasks it left in active/
         local stuck_count=0
         local task_file
@@ -825,7 +831,7 @@ check_and_respawn_dead_workers() {
         done
 
         if [[ "$stuck_count" -gt 0 ]]; then
-            log "Worker $i died with $stuck_count stuck task(s) — unsticking..."
+            log "Worker $i had $stuck_count stuck task(s) — unsticking..."
             local tmp
             tmp=$(mktemp -d)
             if ! git clone "$REPO_DIR" "$tmp" -q 2>&1; then

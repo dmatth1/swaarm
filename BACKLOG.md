@@ -2,10 +2,12 @@
 
 ## P1 — Fix now
 
-### Dead worker detection fails when containers are removed (not just stopped)
-`check_and_respawn_dead_workers` uses `docker inspect` on the container ID from the CID file. If the container was removed entirely (not just stopped), `docker inspect` fails silently and the function never triggers respawn. Workers stay dead with tasks stuck in `active/`, harness keeps polling but never recovers. Observed: all 3 workers died, harness detected "Tasks stuck: 3" but never respawned — required manual restart.
-- [ ] `check_and_respawn_dead_workers` should treat "container not found" the same as "container exited"
+### Dead worker detection improvements — **Partial fix**
+- [x] Added `sync_main` inside `check_and_respawn_dead_workers` before checking active tasks — ensures MAIN_DIR has latest claims from workers that pushed before dying
+- [x] Added log line when dead worker detected (`Worker N is dead (status: gone)`)
+- [x] Container-not-found already handled correctly (`|| running="gone"`)
 - [ ] Test: worker container removed (not stopped) → harness detects and respawns
+- [ ] Root cause of original incident still unclear — may be a timing issue where workers die between `sync_main` and claim detection
 
 ## P2 — Should fix
 
