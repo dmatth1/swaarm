@@ -71,7 +71,7 @@ Talk to Claude Code naturally:
 "Run swarm to build a FastAPI blog server, 4 agents, push to github.com/user/blog"
 
 # Resume existing run
-"Resume the swarm in ProQ4-Dup with 3 agents"
+"Resume the swarm in swarm-20240115-143022 with 3 agents"
 
 # Add guidance mid-run
 "Also add rate limiting — run the orchestrator to create new tasks"
@@ -83,7 +83,7 @@ Talk to Claude Code naturally:
 "Kill the swarm"
 
 # Run specialists
-"Run a ProjectManager sweep on ProQ4-Dup"
+"Run a specialist sweep on the current swarm"
 ```
 
 The harness reads `prompts/harness.md` for operating instructions and manages everything via Docker containers and git.

@@ -258,8 +258,8 @@ Always run ProjectManager last (after all others complete).
 
 ```json
 {
-  "run_id": "ProQ4-Dup",
-  "task": "Build a parametric EQ plugin",
+  "run_id": "swarm-20240115-143022",
+  "task": "Build a REST API todo app with SQLite",
   "agents": 3,
   "model": "opus[1m]",
   "repo": "https://github.com/user/repo",
