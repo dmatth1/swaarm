@@ -79,3 +79,11 @@ No summary at run completion. Hard to tune future runs or understand failures.
 ### Dry-run mode
 No way to preview orchestration before burning API credits.
 - [ ] `./swarm --dry-run "build X"` — run orchestrator only, show task DAG, exit without spawning workers
+
+### Agent-assisted harness (hybrid architecture)
+The bash harness handles polling, spawning, and killing deterministically. But judgment calls (OOM recovery, model routing, task rebalancing) are hardcoded or missing. A hybrid approach: keep bash for the tight event loop (cheap, fast, deterministic) but invoke a Claude agent for decisions when exceptional events occur.
+- [ ] Define event types that trigger agent consultation: worker OOM, stuck state, repeated test failures, rate limit across all workers
+- [ ] Agent receives event context (logs, task state, resource usage) and returns a structured action (reduce workers, switch model, consolidate tasks, etc.)
+- [ ] Bash harness executes the action — agent decides, bash acts
+- [ ] Model routing: agent picks haiku for simple tasks, opus for complex ones based on task description
+- [ ] Cross-run learning: agent reads prior run post-mortems to inform decisions
