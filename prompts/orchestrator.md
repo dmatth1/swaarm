@@ -16,6 +16,11 @@ Your job: analyze the task below, design the approach, define all module interfa
 
 You are working in a git repository. Commit and push all your changes.
 
+**You have passwordless sudo.** If you need to install any tools to analyze the project, do it — don't skip work because a tool is missing.
+- System packages: `sudo apt-get update && sudo apt-get install -y <package>`
+- Examples: `xvfb` for headless rendering, `imagemagick` for image processing, `cmake` for C++ builds
+- Language deps: `pip install`, `npm install`, `go mod download`, etc.
+
 Directory structure:
 - `tasks/pending/` — create task files here (workers will claim them)
 - `tasks/active/` — workers move tasks here while working (don't touch)

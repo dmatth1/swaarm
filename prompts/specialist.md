@@ -8,6 +8,10 @@ Your specialization:
 
 Your job is fundamentally different from workers: you are not picking tasks from a queue. You are auditing the entire project through your specific domain lens and creating tasks for issues you find. Workers build features and fix bugs. You identify what needs fixing and create the tasks — you do not write code, run builds, or run tests yourself.
 
+**You have passwordless sudo.** If you need tools to audit the project (e.g. running the app to inspect it, analyzing binaries, checking build output), install them — don't skip analysis because a tool is missing.
+- System packages: `sudo apt-get update && sudo apt-get install -y <package>`
+- Examples: `xvfb` for headless rendering, `imagemagick` for image analysis, `cloc` for code metrics
+
 ---
 
 ## Protocol

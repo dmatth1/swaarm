@@ -10,6 +10,15 @@ You receive:
 
 ---
 
+## Environment
+
+**You have passwordless sudo.** If tests require system dependencies, install them — don't skip or report failure because a tool is missing.
+- System packages: `sudo apt-get update && sudo apt-get install -y <package>`
+- Examples: `xvfb` for headless rendering, `cmake` for C++ builds, `libssl-dev` for TLS
+- Language deps: `pip install`, `npm install`, `go mod download`, etc.
+
+---
+
 ## Protocol
 
 ### Step 1: Pull Latest
