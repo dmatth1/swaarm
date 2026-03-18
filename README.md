@@ -41,7 +41,7 @@ You: "Run swarm for a todo REST API with 3 agents"
   • Runs swarm-setup.sh (Docker image, auth, workspace init)
   • Spawns orchestrator container → creates SPEC.md + task files
   • Spawns 3 worker containers
-  • Monitors via /loop every 30s — reads git + docker state
+  • Monitors via /loop every 1m — reads git + docker + logs
   • Reviews completions, runs specialist sweeps, handles failures
          │
          ▼
@@ -58,7 +58,7 @@ You: "Run swarm for a todo REST API with 3 agents"
   Your project, complete in main/
 ```
 
-Between workers and completion, the **harness agent** validates each task via a reviewer container (runs tests, checks artifacts). Every 6 completions, a specialist sweep audits the codebase (code quality, reliability, test coverage, performance, documentation). ProjectManager runs last to consolidate specialist findings.
+Between workers and completion, the **harness agent** validates each task via a reviewer container (runs tests, checks artifacts). Periodically (the harness decides when, based on project size and complexity), a specialist sweep audits the codebase (code quality, reliability, test coverage, performance, documentation). ProjectManager runs last to consolidate specialist findings.
 
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 
