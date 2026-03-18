@@ -659,10 +659,11 @@ run_specialist_sweep() {
 
     [[ -z "$spec_names" ]] && return 0
 
-    # Collect specialists to run
+    # Collect specialists to run — separate ProjectManager for post-sweep consolidation
     local -a specialist_names=()
     local -a specialist_roles=()
     local -a specialist_nums=()
+    local pm_name="" pm_role="" pm_num=""
     local sname
     while IFS= read -r sname; do
         [[ -z "$sname" ]] && continue
@@ -672,36 +673,54 @@ run_specialist_sweep() {
         [[ -z "$srole" ]] && continue
 
         _g_specialist_count=$(( _g_specialist_count + 1 ))
-        specialist_names+=("$sname")
-        specialist_roles+=("$srole")
-        specialist_nums+=("$_g_specialist_count")
+        if [[ "$sname" == "ProjectManager" ]]; then
+            pm_name="$sname"
+            pm_role="$srole"
+            pm_num="$_g_specialist_count"
+        else
+            specialist_names+=("$sname")
+            specialist_roles+=("$srole")
+            specialist_nums+=("$_g_specialist_count")
+        fi
     done <<< "$spec_names"
 
     local count="${#specialist_names[@]}"
-    [[ "$count" -eq 0 ]] && return 0
+    local total_count="$count"
+    [[ -n "$pm_name" ]] && total_count=$((total_count + 1))
+    [[ "$total_count" -eq 0 ]] && return 0
 
-    log "Running specialist sweep: ${sweep_label} ($count specialist(s) in parallel)"
+    if [[ "$count" -gt 0 ]]; then
+        log "Running specialist sweep: ${sweep_label} ($count specialist(s) in parallel)"
 
-    # Launch all specialists in parallel
-    local -a pids=()
-    local i
-    for i in $(seq 0 $(( count - 1 ))); do
-        log "  Specialist: ${specialist_names[$i]}"
-        docker_run_specialist "${specialist_names[$i]}" "${specialist_roles[$i]}" "${specialist_nums[$i]}" &
-        pids+=($!)
-    done
+        # Launch all specialists (except ProjectManager) in parallel
+        local -a pids=()
+        local i
+        for i in $(seq 0 $(( count - 1 ))); do
+            log "  Specialist: ${specialist_names[$i]}"
+            docker_run_specialist "${specialist_names[$i]}" "${specialist_roles[$i]}" "${specialist_nums[$i]}" &
+            pids+=($!)
+        done
 
-    # Wait for all to finish — log failures instead of silently ignoring
-    local _failed=0
-    for i in $(seq 0 $(( count - 1 ))); do
-        if ! wait "${pids[$i]}" 2>/dev/null; then
-            warn "Specialist ${specialist_names[$i]} failed (sweep: ${sweep_label})"
-            _failed=$((_failed + 1))
-        fi
-    done
-    [[ "$_failed" -gt 0 ]] && warn "$_failed of $count specialist(s) failed in sweep: ${sweep_label}"
+        # Wait for all to finish — log failures instead of silently ignoring
+        local _failed=0
+        for i in $(seq 0 $(( count - 1 ))); do
+            if ! wait "${pids[$i]}" 2>/dev/null; then
+                warn "Specialist ${specialist_names[$i]} failed (sweep: ${sweep_label})"
+                _failed=$((_failed + 1))
+            fi
+        done
+        [[ "$_failed" -gt 0 ]] && warn "$_failed of $count specialist(s) failed in sweep: ${sweep_label}"
 
-    sync_main
+        sync_main
+    fi
+
+    # Run ProjectManager solo after other specialists — consolidates their tasks
+    # (dedup, renumber, set dependencies, remove unnecessary tasks)
+    if [[ -n "$pm_name" ]]; then
+        log "Running ProjectManager consolidation pass (post-sweep)"
+        docker_run_specialist "$pm_name" "$pm_role" "$pm_num"
+        sync_main
+    fi
 }
 
 check_and_respawn_dead_workers() {
