@@ -1,13 +1,5 @@
 # Swarm Backlog
 
-## P1 — Fix now
-
-### Tests for resume final drain path
-Three chained bugs (a1a33fb, 100289e, ef2c59e) prevented the final drain from running on resume. Fixed but the specific scenarios lack dedicated tests.
-- [ ] Test: resume with 0 pending / 0 active triggers final specialist sweep + final test reviewer
-- [ ] Test: `last_restructure_at` initializes to done_count on resume (periodic orchestrator does NOT fire immediately)
-- [ ] Test: `reviewed.list` persists across restarts — tasks reviewed in run 1 are skipped in run 2
-
 ## P2 — Should fix
 
 ### Auto-fallback on 529 overload

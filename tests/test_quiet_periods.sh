@@ -384,4 +384,188 @@ run_with_review 1
 teardown_test
 trap - EXIT
 
+# ─── Test 10: Resume with 0 pending triggers final drain (specialist sweep + reviewer) ──
+
+setup_test "resume final drain: 0 pending/0 active triggers final specialist sweep + test reviewer"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Pre-populate: 5 done tasks, 0 pending, 0 active
+for i in 1 2 3 4 5; do
+    push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
+done
+
+# Pre-populate reviewed.list so tasks are not re-reviewed
+mkdir -p "$OUTPUT_DIR"
+for i in 1 2 3 4 5; do
+    echo "$(printf '%03d' $i)-task.md"
+done > "$OUTPUT_DIR/reviewed.list"
+
+load_swarm
+
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { :; }
+MAX_WORKER_ITERATIONS=5
+RESTRUCTURE_INTERVAL=999
+
+SPECIALIST_SWEEPS=()
+run_specialist_sweep() { SPECIALIST_SWEEPS+=("$1"); }
+
+docker_run_orchestrator() { mkdir -p "$LOGS_DIR"; }
+
+FINAL_REVIEWER_RAN=false
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    if [[ "$1" == "--final--" ]]; then
+        FINAL_REVIEWER_RAN=true
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    else
+        echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+    fi
+}
+
+run_with_review 1
+
+# Check final specialist sweep ran
+found_final_sweep=false
+for sweep in "${SPECIALIST_SWEEPS[@]+"${SPECIALIST_SWEEPS[@]}"}"; do
+    [[ "$sweep" == "final" ]] && found_final_sweep=true
+done
+[[ "$found_final_sweep" == "true" ]] \
+    && pass "final specialist sweep triggered" \
+    || fail "final specialist sweep did not run (sweeps: ${SPECIALIST_SWEEPS[*]+"${SPECIALIST_SWEEPS[*]}"})"
+
+# Check final test reviewer ran
+[[ "$FINAL_REVIEWER_RAN" == "true" ]] \
+    && pass "final test reviewer ran" \
+    || fail "final test reviewer did not run"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 11: Periodic orchestrator does NOT fire immediately on resume ──────
+
+setup_test "resume final drain: periodic orchestrator does NOT fire with done=reviewed (no new completions)"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Pre-populate: 10 done tasks (well past any interval)
+for i in $(seq 1 10); do
+    push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
+done
+
+# Pre-populate reviewed.list with all 10
+mkdir -p "$OUTPUT_DIR"
+for i in $(seq 1 10); do
+    echo "$(printf '%03d' $i)-task.md"
+done > "$OUTPUT_DIR/reviewed.list"
+
+load_swarm
+
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { :; }
+MAX_WORKER_ITERATIONS=5
+RESTRUCTURE_INTERVAL=3
+
+ORCHESTRATOR_CALLS=0
+docker_run_orchestrator() {
+    ORCHESTRATOR_CALLS=$((ORCHESTRATOR_CALLS + 1))
+    mkdir -p "$LOGS_DIR"
+}
+
+run_specialist_sweep() { :; }
+
+docker_run_reviewer() {
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+run_with_review 1
+
+[[ "$ORCHESTRATOR_CALLS" -eq 0 ]] \
+    && pass "periodic orchestrator did NOT fire on resume (no new completions)" \
+    || fail "periodic orchestrator fired $ORCHESTRATOR_CALLS time(s) — should be 0 on resume with no new work"
+
+teardown_test
+trap - EXIT
+
+# ─── Test 12: reviewed.list persists across restarts ─────────────────────────
+
+setup_test "resume final drain: reviewed.list persists — tasks reviewed in run 1 skipped in run 2"
+trap teardown_test EXIT
+
+init_test_workspace
+
+# Pre-populate: 3 done tasks
+for i in 1 2 3; do
+    push_file_to_repo "tasks/done/$(printf '%03d' $i)-task.md" "# Task $i" "done $i"
+done
+
+load_swarm
+
+docker_run_worker()              { :; }
+monitor_progress()               { :; }
+cleanup_docker()                 { :; }
+check_and_respawn_dead_workers() { :; }
+sleep()                          { :; }
+sync_main()                      { :; }
+MAX_WORKER_ITERATIONS=5
+RESTRUCTURE_INTERVAL=999
+
+run_specialist_sweep() { :; }
+docker_run_orchestrator() { mkdir -p "$LOGS_DIR"; }
+
+REVIEW_COUNT_RUN1=0
+docker_run_reviewer() {
+    REVIEW_COUNT_RUN1=$((REVIEW_COUNT_RUN1 + 1))
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+# Run 1: reviews all 3 tasks + final reviewer
+run_with_review 1
+
+# Verify reviewed.list was written
+[[ -f "$OUTPUT_DIR/reviewed.list" ]] \
+    && pass "reviewed.list created after run 1" \
+    || fail "reviewed.list not found after run 1"
+
+reviewed_count=$(wc -l < "$OUTPUT_DIR/reviewed.list" | tr -d ' ')
+[[ "$reviewed_count" -eq 3 ]] \
+    && pass "reviewed.list has 3 entries" \
+    || fail "expected 3 entries in reviewed.list, got $reviewed_count"
+
+# Run 2: same done tasks, should skip all reviews
+REVIEW_COUNT_RUN2=0
+docker_run_reviewer() {
+    REVIEW_COUNT_RUN2=$((REVIEW_COUNT_RUN2 + 1))
+    mkdir -p "$LOGS_DIR"
+    echo "TESTS_PASS" > "$LOGS_DIR/reviewer-$2.log"
+}
+
+run_with_review 1
+
+# Run 2 should only have the final reviewer (1 call), no per-task reviews
+[[ "$REVIEW_COUNT_RUN2" -le 1 ]] \
+    && pass "run 2 skipped per-task reviews ($REVIEW_COUNT_RUN2 reviewer calls, expected 0-1 for final only)" \
+    || fail "run 2 re-reviewed tasks ($REVIEW_COUNT_RUN2 calls, expected 0-1)"
+
+# Run 1 should have had more reviews (3 per-task + 1 final = 4)
+[[ "$REVIEW_COUNT_RUN1" -ge 3 ]] \
+    && pass "run 1 reviewed all tasks ($REVIEW_COUNT_RUN1 calls)" \
+    || fail "run 1 should have reviewed 3+ tasks, got $REVIEW_COUNT_RUN1"
+
+teardown_test
+trap - EXIT
+
 print_summary
