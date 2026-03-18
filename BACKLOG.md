@@ -15,6 +15,3 @@ No visibility into API token spend per run.
 - [ ] Aggregate and report totals at run completion
 
 ## P4 — Ideas
-
-### Task dependency graph visualization
-- [ ] Agent can generate DOT/Mermaid diagram of task DAG on request
