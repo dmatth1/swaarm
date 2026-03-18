@@ -23,98 +23,79 @@ The Docker image is built automatically on first run (~2 min). It includes Claud
 
 ## Quick start
 
-```bash
-chmod +x ./swarm
+Open Claude Code in the swarm directory and say:
 
-./swarm "Build a REST API for a todo app with SQLite"
+```
+"Run swarm for a REST API todo app with SQLite, 3 agents"
 ```
 
-Your project lands in `swarm-TIMESTAMP/main/`.
+Claude Code reads the harness instructions, sets up the workspace, spawns the orchestrator and workers, and monitors the run — all conversationally. Your project lands in a `swarm-TIMESTAMP/main/` directory.
 
 ## How it works
 
 ```
-You: ./swarm "Build a todo REST API" --agents 3
+You: "Run swarm for a todo REST API with 3 agents"
          │
          ▼
-  Orchestrator (1 Claude session)
-  • Analyzes the task
-  • Writes SPEC.md with tech stack, architecture, file layout
-  • Creates numbered task files in tasks/pending/ (as many as needed)
-  • Commits everything to shared bare git repo
+  Claude Code (harness)
+  • Runs swarm-setup.sh (Docker image, auth, workspace init)
+  • Spawns orchestrator container → creates SPEC.md + task files
+  • Spawns 3 worker containers
+  • Monitors via /loop every 30s — reads git + docker state
+  • Reviews completions, runs specialist sweeps, handles failures
          │
          ▼
-  Workers (N parallel Claude sessions)
+  Workers (N parallel Claude sessions in Docker)
   Each worker loops:
   1. git pull (see latest state)
-  2. Claim a task: mv tasks/pending/NNN-task.md tasks/active/worker-N--NNN-task.md + push
-     → git's atomic push is the lock: if two workers race, one push fails, loser picks another task
+  2. Claim a task: mv tasks/pending/NNN.md → tasks/active/worker-N--NNN.md + push
+     → git's atomic push is the lock: if two race, one fails, loser picks another
   3. Do the work, commit as you go
-  4. Mark done: mv tasks/active/... tasks/done/NNN-task.md + push
-  5. Signal TASK_DONE → shell loop restarts with same prompt for next task
+  4. Mark done: mv tasks/active/... → tasks/done/NNN.md + push
   Until no tasks remain
          │
          ▼
   Your project, complete in main/
 ```
 
-Between workers and completion, a **reviewer agent** validates each task (runs tests, checks artifacts, adds fix tasks if needed). Every 6 completions (configurable via `RESTRUCTURE_INTERVAL`), the orchestrator runs in augment mode alongside a specialist sweep (code quality, reliability, test coverage, performance, documentation, project management).
+Between workers and completion, the **harness agent** validates each task via a reviewer container (runs tests, checks artifacts). Every 6 completions, a specialist sweep audits the codebase (code quality, reliability, test coverage, performance, documentation). ProjectManager runs last to consolidate specialist findings.
 
 No message broker. No infrastructure. Just Docker, git, and Claude Code.
 
-## vs. the Anthropic blog post
-
-swarm closely matches Anthropic's original multi-agent architecture:
-
-- Bare git repo as the shared coordination hub
-- Each agent runs in its own Docker container with an isolated `/workspace`
-- Git's atomic push as the distributed lock (two agents racing to claim the same task: one push wins, the other is rejected and picks a different task)
-- Stateless agent invocations (each Claude session starts fresh, reads the repo to find its task)
-- Pull → work → commit → push cycle with merge conflict handling
-
-**What swarm adds:** an explicit 3-state task machine (`tasks/pending/` → `tasks/active/` → `tasks/done/`) with numbered files, giving clearer progress visibility than the blog post's `current_tasks/` lock files.
-
-**One difference from the blog post:** swarm workers are long-lived containers — each worker clones the repo once at startup and loops across multiple tasks rather than spawning a fresh container per task. Non-git state (installed packages, build artifacts) persists within a worker's `/workspace` across tasks, which is intentional — a setup task's installed dependencies are available to subsequent tasks on the same worker. All canonical project state lives in git regardless.
-
 ## Usage
 
-```bash
-./swarm "<prompt>" [OPTIONS]
+Talk to Claude Code naturally:
 
-Options:
-  -n, --agents N    Number of parallel workers (default: 3)
-  -o, --output DIR  Output directory (new run if absent, resume if exists)
-  -v, --verbose     Show agent output in terminal (logs always stream to files)
-  --model MODEL     Claude model to use (e.g. opus, sonnet, opus[1m])
-  --repo URL        Push to a remote GitHub repo (keeps local coordination fast)
-  --mount H:C       Mount HOST path to CONTAINER path (repeatable)
-  -h, --help        Show help
+```
+# New run
+"Run swarm to build a FastAPI blog server, 4 agents, push to github.com/user/blog"
+
+# Resume existing run
+"Resume the swarm in ProQ4-Dup with 3 agents"
+
+# Add guidance mid-run
+"Also add rate limiting — run the orchestrator to create new tasks"
+
+# Check status
+"What's the swarm status?"
+
+# Kill a run
+"Kill the swarm"
+
+# Run specialists
+"Run a ProjectManager sweep on ProQ4-Dup"
 ```
 
-```bash
-# Resume with new guidance — just point -o at an existing run
-./swarm "Also add rate limiting" -o ./swarm-20240115-143022
-./swarm "Fix the tests" -o ./swarm-20240115-143022 -n 5
+The harness reads `prompts/harness.md` for operating instructions and manages everything via Docker containers and git.
 
-# Utility subcommands
-./swarm status <output-dir>              # live status
-./swarm kill <output-dir> [worker-N]     # stop agents
-./swarm logs <output-dir> [worker-N]     # tail logs
-./swarm cleanup [output-dir]             # remove orphaned containers
-```
+### Parameters
 
-## Examples
-
-```bash
-# New projects
-./swarm "Build a Python CLI that converts CSV to JSON"
-./swarm "Build a FastAPI blog server with CRUD" --agents 4
-./swarm "Build a real-time chat server" --model opus --repo https://github.com/user/chat
-
-# Resume / add guidance to existing run
-./swarm "Also add WebSocket support" -o ./swarm-20240115-143022
-./swarm "Fix the failing integration tests" -o ./swarm-20240115-143022 -n 5
-```
+When starting a run, you can specify:
+- **Number of agents** (default 3)
+- **Model** (default sonnet, e.g. "opus", "opus[1m]", "haiku")
+- **Output directory** (default swarm-TIMESTAMP)
+- **Remote repo** (optional GitHub URL for mirroring)
+- **Extra mounts** (optional, e.g. reference docs)
 
 ## Output structure
 
@@ -125,161 +106,102 @@ swarm-20240115-143022/
 │   ├── CLAUDE.md            ← Living project index (auto-loaded by workers)
 │   ├── PROGRESS.md          ← Progress log
 │   ├── tasks/
-│   │   ├── pending/         ← NNN-taskname.md files waiting to be claimed
-│   │   ├── active/          ← worker-N--NNN-taskname.md (currently being worked)
-│   │   └── done/            ← NNN-taskname.md (completed)
-│   └── [your project files] ← The actual code
+│   │   ├── pending/         ← NNN-taskname.md waiting to be claimed
+│   │   ├── active/          ← worker-N--NNN-taskname.md in progress
+│   │   └── done/            ← NNN-taskname.md completed
+│   └── [your project files]
 ├── logs/
 │   ├── orchestrator.log
 │   ├── worker-1.log
-│   ├── worker-2.log
-│   └── reviewer.log
-├── pids/
-│   ├── worker-1.cid         ← Docker container ID, cleaned up when worker exits
-│   └── worker-2.cid
-├── repo.git/                ← Bare git repo (the coordination hub)
-└── swarm.state              ← Persists task + agent count for resume
+│   ├── reviewer-N.log
+│   └── specialist-*.log
+├── repo.git/                ← Bare git repo (coordination hub)
+└── harness-state.json       ← Agent decisions (reviewed tasks, sweep counts)
 ```
 
 ## Monitoring
 
-Agent logs stream in real-time — you can watch what each agent's Claude is thinking as it works.
+The harness agent monitors automatically via `/loop`. You can also check manually:
 
 ```bash
-# Follow all agent logs (real-time)
-./swarm logs ./swarm-20240115-143022
+# Running containers
+docker ps --filter "name=swarm-"
 
-# Follow a specific worker
-./swarm logs ./swarm-20240115-143022 worker-1
+# Follow worker logs
+tail -f swarm-*/logs/worker-*.log
 
-# Live task progress
-watch -n 5 'ls swarm-*/main/tasks/done/'
-
-# Structured status view
-./swarm status ./swarm-20240115-143022
+# Task progress
+ls swarm-*/main/tasks/done/ | wc -l   # completed
+ls swarm-*/main/tasks/pending/ | wc -l # remaining
 ```
 
-## Resuming and adding guidance
+Or just ask Claude Code: "What's the status of the swarm?"
 
-Point `-o` at an existing swarm output directory to resume. You can provide new guidance in the prompt — the orchestrator runs in augment mode to create additional tasks:
+## Resuming
 
-```bash
-# Resume after crash/rate-limit
-./swarm -o ./swarm-20240115-143022
+Point Claude Code at an existing output directory to resume. The harness:
+1. Reads `harness-state.json` to know what's been reviewed and decided
+2. Moves stuck `tasks/active/` files back to `pending/`
+3. Spawns fresh workers on remaining tasks
+4. Resumes the monitoring loop
 
-# Add new features to an existing run
-./swarm "Also add rate limiting and an admin dashboard" -o ./swarm-20240115-143022
+Context compaction is safe — the harness re-reads git state and the state file every cycle.
 
-# Resume with more workers
-./swarm "Fix the failing tests" -o ./swarm-20240115-143022 -n 5
-```
-
-Resume automatically:
-1. Moves any stuck `tasks/active/worker-N--*.md` files back to `tasks/pending/`
-2. If new guidance is provided, runs the orchestrator in augment mode — it reads the existing SPEC.md and codebase, updates the spec, and creates new tasks
-3. Runs a specialist sweep after augmentation (exclusive repo access)
-4. Spawns fresh workers to finish remaining + new tasks
-
-**Rate limits are handled automatically.** Workers detect rate-limit responses from Claude — both API-level 429 errors and account-level usage caps ("You've hit your limit") — and sleep with exponential backoff (5 min → 15 min → 30 min → 1 hr → 2 hr → 4 hr, ±20% jitter). No intervention needed.
+**Rate limits are handled automatically.** Workers detect rate-limit responses and sleep with exponential backoff (5 min → 4 hr, ±20% jitter).
 
 ## Pushing to GitHub
 
-Use `--repo` to mirror all progress to a remote GitHub repository:
+Specify a remote repo URL and the harness pushes after each monitoring cycle:
 
-```bash
-./swarm "Build a REST API" --repo https://github.com/user/my-api
+```
+"Run swarm for X, push to github.com/user/my-api"
 ```
 
-Workers coordinate through the local bare repo (fast). The harness pushes to GitHub after each status sync. When `--repo` is set, all agents receive a security notice prohibiting commits of API keys, passwords, PII, or other secrets.
-
-## Killing agents
-
-```bash
-# Kill all running agents
-./swarm kill ./swarm-20240115-143022
-
-# Kill just worker-2 (e.g. it's stuck)
-./swarm kill ./swarm-20240115-143022 worker-2
-```
-
-After killing, run `./swarm -o <dir>` to restart workers on remaining tasks. No manual git manipulation needed.
+Workers coordinate through the local bare repo (fast). When a remote is set, all agents receive a security notice prohibiting secrets/PII.
 
 ## How the git lock works
 
-This is the same coordination mechanism Anthropic used in their 16-agent compiler experiment.
+Same coordination as Anthropic's 16-agent compiler experiment. When two workers claim the same task:
 
-When two workers simultaneously try to claim the same task:
-
-1. Both move `tasks/pending/003-routes.md` → `tasks/active/worker-N--003-routes.md` locally
+1. Both move `tasks/pending/003-routes.md` → `tasks/active/worker-N--003-routes.md`
 2. Both push — one succeeds, one gets `rejected (non-fast-forward)`
-3. The loser does `git pull`, sees the task is already in `tasks/active/` under a different name, and picks a different task
+3. The loser pulls, sees the task is claimed, picks another
 
-No lock server needed. Git's atomic push is the lock.
+No lock server. Git's atomic push is the lock.
 
-## Choosing agent count
+## vs. the Anthropic blog post
 
-Agent count is a tradeoff between parallelism and coordination overhead. A rough guide:
+swarm closely matches Anthropic's original multi-agent architecture:
 
-| Agents | When to use |
-|--------|-------------|
-| 2 | Tasks with many sequential dependencies |
-| 3 (default) | Most tasks |
-| 4–5 | Large projects with many independent components |
-| 6+ | Very large codebases, explicitly parallel work (e.g. test suites) |
+- Bare git repo as the shared coordination hub
+- Each agent in its own Docker container with isolated `/workspace`
+- Git's atomic push as the distributed lock
+- Stateless agent invocations (each Claude session reads the repo fresh)
 
-The orchestrator creates tasks with parallelism in mind, but it can't always predict every dependency. More agents doesn't always mean faster completion.
-
-## Troubleshooting
-
-**"No tasks completed. Check logs"**
-The orchestrator failed before creating tasks. Check `logs/orchestrator.log`. The task description may be too vague, or Claude Code may not be authenticated.
-
-**Workers finish instantly with no work done**
-Previously caused by empty `tasks/active/` and `tasks/done/` dirs not being tracked by git, causing workers to crash on missing paths. Fixed with `.gitkeep` files in bootstrap. If you see this on an older version, update.
-
-**Worker stuck in `tasks/active/` indefinitely**
-The worker likely crashed mid-task. Check `logs/worker-N.log`, then run `./swarm -o <dir>` — it moves stuck tasks back to pending and restarts workers automatically.
-
-**"git push rejected"**
-This is normal — another worker claimed the same task first. Workers handle this automatically by pulling and picking a different task.
-
-**Merge conflicts**
-Also normal. Workers auto-resolve by rebasing.
+**What swarm adds:** a 3-state task machine (`pending/` → `active/` → `done/`), a reviewer quality gate, periodic specialist sweeps, and an adaptive agent harness that can reason about failures.
 
 ## Customizing agent behavior
 
 Edit the prompts to change how agents approach tasks:
 
-- `prompts/orchestrator.md` — controls task decomposition: how many tasks, how detailed, what tech stack preferences, naming conventions
-- `prompts/worker.md` — controls how workers claim tasks, write code, handle blockers, structure commits
-- `prompts/reviewer.md` — controls how the reviewer validates work, runs tests, and manages task quality
-- `prompts/specialist.md` — controls specialist agent behavior (code quality sweeps)
-- `prompts/task-format.md` — shared task creation guide appended to all task-creating agents at runtime
+- `prompts/orchestrator.md` — task decomposition, tech stack, naming
+- `prompts/worker.md` — how workers claim tasks, write code, handle blockers
+- `prompts/reviewer.md` — test validation, artifact checks
+- `prompts/specialist.md` — specialist audit behavior (audit-only, create tasks)
+- `prompts/task-format.md` — shared task creation guide
+- `prompts/harness.md` — harness monitoring and decision logic
 
-Prompts use `{{TASK}}` and `{{AGENT_ID}}` placeholders substituted at runtime. You can specialize these for a domain — e.g., always use TypeScript, always write tests first, always target a specific framework.
+## Architecture
 
-## swarm vs Claude Code Agent Teams
+The harness is Claude Code itself, operating via instructions in `prompts/harness.md`. A thin setup script (`swarm-setup.sh`) handles deterministic plumbing (Docker build, auth extraction, workspace init).
 
-Claude Code has a native [agent teams feature](https://code.claude.com/docs/en/agent-teams) (experimental, disabled by default).
+**Ground truth** is always:
+- **Git** for task state (`tasks/pending/`, `tasks/active/`, `tasks/done/`)
+- **Docker** for worker health (`docker ps`)
+- **`harness-state.json`** for agent decisions (what's been reviewed, when sweeps ran)
 
-| | swarm | Agent Teams |
-|--|--|--|
-| **Status** | Stable | Experimental (requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) |
-| **Interface** | Fire-and-forget CLI | Interactive (lives in your terminal session) |
-| **Coordination** | Bare git repo + file moves | Shared task list + mailbox |
-| **Agent comms** | None (git only) | Direct peer-to-peer messaging + broadcast |
-| **Isolation** | Each agent in its own Docker container | Shared filesystem, no container isolation |
-| **Built-in QA** | Reviewer agent runs tests, adds fix tasks automatically | No built-in QA loop — lead coordinates manually |
-| **Rate limits** | Automatic exponential backoff (5m → 4hr) | No built-in handling |
-| **Resume** | `./swarm -o <dir>` — fully recoverable | `/resume` does not restore teammates |
-| **Remote push** | `--repo` mirrors to GitHub automatically | No built-in remote push |
-| **Visibility** | Log files, `status` command, `logs` tail | tmux split panes / Shift+Down |
-| **Human steering** | Not needed (but resume with new prompt adds guidance mid-run) | Redirect agents mid-task, message teammates directly |
-| **Token cost** | Lower (stateless sessions, re-reads git each turn) | Higher (each teammate has persistent full context) |
-| **Best for** | Automated pipelines, unattended runs, CI | Interactive development, research, code review |
-
-Use swarm when you want to hand off a task and walk away. Use Agent Teams when you want to observe and steer in real time.
+The harness re-reads all three sources every monitoring cycle. No in-memory state to lose.
 
 ## Contributing
 
-Known bugs, missing tests, and planned features are tracked in [`BACKLOG.md`](BACKLOG.md).
+Known bugs and planned features are tracked in [`BACKLOG.md`](BACKLOG.md).
