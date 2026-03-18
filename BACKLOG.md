@@ -9,10 +9,9 @@ The agent harness (`prompts/harness.md` + `/loop`) replaces the bash harness. It
 - [ ] Verify: context compaction doesn't break monitoring (state file re-read)
 
 ### Auto-fallback on 529 overload
-Workers backoff and retry the same model indefinitely on 529. Should detect sustained overload and switch to a fallback model (e.g. opus → sonnet).
-- [ ] Detect 529 separately from rate-limit (429)
-- [ ] After N consecutive 529s, switch to fallback model
-- [ ] Make fallback chain configurable
+Harness log check (Step 5) already detects 529 patterns. Currently just suggests switching model — should auto-act.
+- [ ] When harness sees repeated 529s in worker logs, kill worker and respawn with fallback model
+- [ ] Document fallback chain in harness-state.json (e.g. `"model_fallback": ["opus", "sonnet"]`)
 
 ## P3 — Later (cloud prep)
 
@@ -26,11 +25,11 @@ No visibility into API token spend per run.
 ### Task dependency graph visualization
 - [ ] Agent can generate DOT/Mermaid diagram of task DAG on request
 
-### Post-mortem report
-- [ ] Agent generates summary at run completion: tasks, time, decisions, failures
-
 ### Worker task affinity
-- [ ] Prefer workers who completed prerequisite tasks (shared filesystem state)
+Workers get `MODEL` and identity at container start — can't reassign per-task. Affinity would require the harness to track which worker did which prerequisite and route tasks accordingly, but workers self-select tasks from the queue.
+- [ ] Explore: harness hints preferred worker in task file, worker prompt checks hint before claiming
 
 ### Incremental test running
-- [ ] Reviewer runs only related tests, full suite on final drain
+Reviewer behavior lives in `prompts/reviewer.md`, independent of harness architecture. Still relevant.
+- [ ] Reviewer detects changed files, runs only related tests
+- [ ] Full suite on final drain only
