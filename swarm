@@ -64,6 +64,8 @@ Subcommands:
   swarm kill <output-dir> [agent-id]  Kill all agents or a specific one
   swarm logs <output-dir> [agent]     Tail agent logs in real-time
   swarm cleanup [output-dir]          Remove orphaned containers (all runs, or specific run)
+  swarm sweep <output-dir>            Run all specialists (ProjectManager last)
+  swarm sweep <output-dir> --specialist NAME  Run a single specialist by name
 
 Examples:
   # New run (creates swarm-TIMESTAMP/)
@@ -309,6 +311,83 @@ cmd_cleanup() {
     else
         log "No swarm containers found"
     fi
+}
+
+cmd_sweep() {
+    local output_dir="${1:-}"
+    local specialist_filter="${2:-}"  # empty = all, or a specific name
+
+    if [[ -z "$output_dir" ]]; then
+        error "Usage: swarm sweep <output-dir> [--specialist NAME]"
+        exit 1
+    fi
+    if [[ ! -d "$output_dir/main/tasks" ]]; then
+        error "Not a swarm output directory: $output_dir"
+        exit 1
+    fi
+
+    OUTPUT_DIR="$(cd "$output_dir" && pwd)"
+    REPO_DIR="$OUTPUT_DIR/repo.git"
+    LOGS_DIR="$OUTPUT_DIR/logs"
+    MAIN_DIR="$OUTPUT_DIR/main"
+    RUN_ID="$(basename "$OUTPUT_DIR")"
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROMPTS_DIR="$SCRIPT_DIR/prompts"
+
+    # Load state for MODEL, REMOTE_REPO, EXTRA_MOUNTS
+    local state_file="$OUTPUT_DIR/swarm.state"
+    if [[ -f "$state_file" ]]; then
+        # shellcheck source=/dev/null
+        source "$state_file"
+        [[ -z "$MODEL" && -n "${SWARM_MODEL:-}" ]] && MODEL="$SWARM_MODEL"
+        [[ -z "$REMOTE_REPO" && -n "${SWARM_REPO:-}" ]] && REMOTE_REPO="$SWARM_REPO"
+    fi
+
+    ensure_docker_image
+
+    # Sync main view
+    (cd "$MAIN_DIR" && git pull origin main -q) 2>/dev/null || true
+
+    _g_specialist_count=0
+
+    if [[ -n "$specialist_filter" ]]; then
+        # Run a single specialist by name
+        local srole
+        srole=$(awk -v name="$specialist_filter" '$0 == "### " name {found=1; next} found && /^### /{exit} found && NF{print}' \
+            "$MAIN_DIR/SPEC.md" 2>/dev/null) || true
+
+        if [[ -z "$srole" ]]; then
+            error "Specialist '$specialist_filter' not found in $MAIN_DIR/SPEC.md ## Specialists"
+            exit 1
+        fi
+
+        _g_specialist_count=1
+        log "Running specialist: $specialist_filter"
+        docker_run_specialist "$specialist_filter" "$srole" "1"
+
+        # If it wasn't ProjectManager, run PM after to consolidate
+        if [[ "$specialist_filter" != "ProjectManager" ]]; then
+            local pm_role
+            pm_role=$(awk -v name="ProjectManager" '$0 == "### " name {found=1; next} found && /^### /{exit} found && NF{print}' \
+                "$MAIN_DIR/SPEC.md" 2>/dev/null) || true
+            if [[ -n "$pm_role" ]]; then
+                _g_specialist_count=2
+                log "Running ProjectManager consolidation pass"
+                docker_run_specialist "ProjectManager" "$pm_role" "2"
+            fi
+        fi
+    else
+        # Run full sweep (reuses run_specialist_sweep which handles PM-last)
+        run_specialist_sweep "ad-hoc"
+    fi
+
+    # Sync after sweep
+    (cd "$MAIN_DIR" && git pull origin main -q) 2>/dev/null || true
+    if [[ -n "$REMOTE_REPO" ]]; then
+        (cd "$REPO_DIR" && git push github --all -q) 2>/dev/null || true
+    fi
+
+    success "Sweep complete"
 }
 
 cmd_resume() {
@@ -1399,6 +1478,20 @@ case "${1:-}" in
     cleanup)
         shift
         cmd_cleanup "${1:-}"
+        exit 0
+        ;;
+    sweep)
+        shift
+        _sweep_dir="${1:-}"; shift || true
+        _sweep_specialist=""
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --specialist) _sweep_specialist="$2"; shift 2 ;;
+                --model)      MODEL="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        cmd_sweep "$_sweep_dir" "$_sweep_specialist"
         exit 0
         ;;
 esac

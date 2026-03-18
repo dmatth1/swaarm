@@ -2,12 +2,11 @@
 
 ## P2 — Should fix
 
-### `./swarm sweep` subcommand for ad-hoc specialist runs
-No way to run a single specialist or a full sweep without resuming the entire swarm. Useful for: running ProjectManager to consolidate after manual task edits, running QAEngineer to audit test coverage, or re-running a failed specialist.
-- [ ] `./swarm sweep <output-dir>` — run all specialists (same as periodic sweep)
-- [ ] `./swarm sweep <output-dir> --specialist ProjectManager` — run a single specialist by name
-- [ ] Reads specialist roster from the project's SPEC.md `## Specialists` section
-- [ ] ProjectManager always runs last (after other named specialists if multiple specified)
+### `./swarm sweep` subcommand — **Done**
+- [x] `./swarm sweep <output-dir>` — full sweep (all specialists parallel, PM last)
+- [x] `./swarm sweep <output-dir> --specialist NAME` — single specialist, PM consolidation after
+- [x] `./swarm sweep <output-dir> --specialist ProjectManager` — PM solo (no auto-consolidation)
+- [x] Reads roster from project's SPEC.md, supports `--model` override
 
 ### Auto-fallback on 529 overload
 Workers backoff and retry the same model indefinitely on 529. Should detect sustained overload and switch to a fallback model (e.g. opus → sonnet).

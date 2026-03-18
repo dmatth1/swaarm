@@ -112,6 +112,8 @@ Each agent runs in its own container (`swarm-agent` image). Volume mounts: `repo
 ./swarm kill <output-dir> [agent-id]
 ./swarm logs <output-dir> [worker-N]     # tail agent logs in real-time
 ./swarm cleanup [output-dir]             # remove orphaned containers
+./swarm sweep <output-dir>               # run all specialists (PM last to consolidate)
+./swarm sweep <output-dir> --specialist NAME  # run one specialist (PM consolidates after)
 ```
 
 `swarm.state` (written at init) stores `SWARM_TASK`, `SWARM_AGENTS`, `SWARM_MODEL`, `SWARM_REPO`, `SWARM_DOCKER_MEMORY` for resume.
