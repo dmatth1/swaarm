@@ -163,8 +163,8 @@ When you do review:
 - **Only then** spawn workers for any new/remaining tasks
 
 **Final drain →** When pending = 0, active = 0, and no reviewers are still running — **act immediately, do not ask the user:**
-1. Run final specialist sweep (all specialists parallel, then PM solo). **This is mandatory, not optional.**
-2. Sync main and re-check pending count — if specialists created new tasks, spawn workers and continue monitoring
+1. Run final specialist sweep (all specialists parallel, then PM solo). **This is mandatory, not optional.** Workers must already be stopped (pending=0, active=0 means they've exited or been killed). Do not spawn workers until PM finishes.
+2. Sync main and re-check pending count — if specialists created new tasks, wait for PM to consolidate, then spawn workers and continue monitoring
 3. If still pending = 0: run final reviewer with `COMPLETED_TASK=--final--`
 4. If `TESTS_PASS`: declare run complete, stop monitoring
 5. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring
