@@ -2,12 +2,6 @@
 
 ## P2 — Should fix
 
-### Test the agent harness end-to-end
-The agent harness (`prompts/harness.md` + `/loop`) replaces the bash harness. It needs real-world validation.
-- [ ] Run a small project (5-10 tasks) fully managed by the agent harness
-- [ ] Verify: new run, resume, specialist sweeps, final drain all work
-- [ ] Verify: context compaction doesn't break monitoring (state file re-read)
-
 ### Auto-fallback on 529 overload
 Harness log check (Step 5) already detects 529 patterns. Currently just suggests switching model — should auto-act.
 - [ ] When harness sees repeated 529s in worker logs, kill worker and respawn with fallback model
