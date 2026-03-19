@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     golang-go \
     build-essential \
-    ccache \
     curl \
     sudo \
     && rm -rf /var/lib/apt/lists/*
