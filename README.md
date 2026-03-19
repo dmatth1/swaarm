@@ -15,7 +15,7 @@ Inspired by [Anthropic's multi-agent C compiler experiment](https://www.anthropi
 swarm runs Claude Code inside Docker containers. It extracts your auth token automatically:
 
 - **macOS**: reads from the `Claude Code-credentials` Keychain entry (created when you run `claude` and log in)
-- **Linux**: reads from `~/.claude/credentials.json`
+- **Linux**: reads from `~/.claude/.credentials.json` (or `~/.claude/credentials.json`)
 
 If you haven't authenticated yet, run `claude` once in your terminal and log in. That's it — swarm handles the rest.
 
@@ -224,6 +224,26 @@ The harness is Claude Code itself, operating via instructions in `prompts/harnes
 - **`harness-state.json`** for agent decisions (what's been reviewed, when sweeps ran)
 
 The harness re-reads all three sources every monitoring cycle. No in-memory state to lose.
+
+## Running on EC2
+
+For large projects (C++ builds, 5+ workers), a local machine may not have enough RAM. An EC2 `r6i.2xlarge` (64GB, 8 vCPUs, ~$0.15/hr spot) runs swarm comfortably:
+
+```bash
+# Ubuntu 22.04 instance
+sudo apt-get install -y docker.io tmux git
+curl -fsSL https://claude.ai/install.sh | bash
+git clone https://github.com/your/swarm-fork.git ~/swarm
+
+# Use tmux so the session survives SSH disconnect
+tmux new -s swarm
+cd ~/swarm
+claude --dangerously-skip-permissions
+# Detach: Ctrl+B, D
+# Reconnect: tmux attach -t swarm
+```
+
+Docker on Linux uses all available RAM by default — no cap like Docker Desktop on Mac.
 
 ## Contributing
 
