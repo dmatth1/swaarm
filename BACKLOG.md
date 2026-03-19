@@ -2,13 +2,6 @@
 
 ## P1 — High impact
 
-## P2 — Should fix
-
-### Monitoring loop interval should adapt to long-running containers
-1-minute polling is right when workers are completing tasks frequently. It's wrong when a reviewer is doing a 25-minute build — generates 25 no-op cycles with zero useful signal.
-- [ ] After launching a reviewer or specialist sweep, log `last_long_op_started_at` in harness-state.json
-- [ ] In harness.md monitoring guidance: if a reviewer/specialist was launched within the last 10 minutes and log is still at header size, skip detailed checks and just push to remote
-- [ ] Or: use `/loop 5m` when entering final drain instead of 1m
 
 ## P3 — Later (cloud prep)
 
