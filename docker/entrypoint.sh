@@ -10,14 +10,6 @@ unset CLAUDECODE 2>/dev/null || true
 git config --global --add safe.directory /upstream
 git config --global --add safe.directory /workspace
 
-# Enable ccache for C/C++ builds automatically (if cache dir is mounted)
-if command -v ccache &>/dev/null; then
-    export CMAKE_C_COMPILER_LAUNCHER=ccache
-    export CMAKE_CXX_COMPILER_LAUNCHER=ccache
-    export CC="ccache gcc"
-    export CXX="ccache g++"
-fi
-
 ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
     echo "Usage: /entrypoint.sh orchestrator | worker <agent-id>" >&2
