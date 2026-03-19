@@ -52,7 +52,7 @@ When the user asks you to run swarm for a project:
    ```bash
    mkdir -p <output-dir>/build-cache
    ```
-   Add `-v <output-dir>/build-cache:/root/.cache` to every worker and reviewer `docker run` command. Workers should install the appropriate cache tool (e.g. `ccache` for C++, `sccache` for Rust) and configure their build system to use it. First build is slow, subsequent builds are near-instant.
+   Add `-v <output-dir>/build-cache:/root/.cache` to every worker and reviewer `docker run` command. `ccache` is pre-installed in the Docker image and auto-enabled for C/C++ builds via entrypoint.sh — no worker configuration needed. First build populates the cache, subsequent builds are near-instant.
 
 8. **Spawn workers** (see Docker Commands). Verify each started:
    ```bash
