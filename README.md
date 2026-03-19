@@ -38,7 +38,7 @@ You: "Run swarm for a todo REST API with 3 agents"
   • Runs swarm-setup.sh (Docker image, auth, workspace init)
   • Spawns orchestrator container → creates SPEC.md + task files
   • Spawns worker containers (up to your max)
-  • Monitors via /loop every 1m — reads git + docker + logs
+  • Monitors via /loop every 5m — reads git + docker + logs
   • Reviews completions, runs specialist sweeps, handles failures
          │
          ▼
