@@ -16,11 +16,6 @@ The orchestrator was told to install Xvfb and test the UI visually before creati
 - [ ] In harness.md monitoring guidance: if a reviewer/specialist was launched within the last 10 minutes and log is still at header size, skip detailed checks and just push to remote
 - [ ] Or: use `/loop 5m` when entering final drain instead of 1m
 
-### Task number collisions from specialist-created tasks
-Multiple tasks ended up sharing the same number prefix (140-*, 141-*, 157-*, etc.) because specialists created tasks mid-run and PM renumbering didn't always cleanly increment. The `tasks/done/` directory had five different tasks all numbered 140.
-- [ ] Update task-format.md and PM prompt: "All tasks must have globally unique numbers. Number new tasks sequentially from NEXT_TASK_NUM. Never assign the same number to two tasks."
-- [ ] PM prompt should explicitly say: scan existing pending/active/done for the highest number before assigning new ones
-
 ### Early specialist sweeps for complex projects
 Specialists found serious threading data races, audio thread violations, and wrong filter math — but only during final sweeps, after workers had already built more code on top of the bugs. Earlier sweeps would catch these when they're cheaper to fix.
 - [ ] Update harness.md decision logic: "for projects with complex concurrent architecture (C++, multi-threaded, audio/realtime), run a specialist sweep at ~30% and ~60% completion in addition to the periodic sweep cadence"

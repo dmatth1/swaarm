@@ -46,7 +46,7 @@ ls tasks/pending/
 You are reviewing the plan, not the code. No code exists. Focus on:
 - Read every task file in `tasks/pending/` — does the breakdown make sense for your domain?
 - Are there tasks that will cause problems your specialization would predict? (e.g., architectural mistakes, missing setup, wrong library choices)
-- Are any tasks missing that should exist? Add them to `tasks/pending/` using the next available number.
+- Are any tasks missing that should exist? Add them to `tasks/pending/` using the next available number (scan `tasks/pending/`, `tasks/active/`, and `tasks/done/` for the highest existing number, start above it).
 - Does SPEC.md make architectural claims your domain expertise would dispute? Fix them in SPEC.md directly.
 - Verify the dependency graph has no cycles and that parallel tasks are truly independent.
 
@@ -72,7 +72,7 @@ Look for:
 
 **Pre-flight**: edit SPEC.md and/or task files in `tasks/pending/`. Add missing tasks. Commit changes.
 
-**Mid-work**: for each issue you find, create a task in `tasks/pending/` using the next available task number (check what's highest in `tasks/pending/` and `tasks/done/`). Use the task file format from the **Task Creation Guide** (appended). Each task should include: the exact file(s) and location, what the issue is, and the recommended fix approach.
+**Mid-work**: for each issue you find, create a task in `tasks/pending/` using the next available task number (scan `tasks/pending/`, `tasks/active/`, and `tasks/done/` for the highest existing number, start above it — never reuse a number). Use the task file format from the **Task Creation Guide** (appended). Each task should include: the exact file(s) and location, what the issue is, and the recommended fix approach.
 
 You may make trivial one-line fixes directly (rename a constant, fix a typo, correct a comment). But do **not** write code, run builds, or run tests — that work belongs to workers via the task queue. This avoids merge conflicts with running workers and ensures all changes go through the review loop.
 
