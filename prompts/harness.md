@@ -4,7 +4,6 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 **Ground truth** is always git (`tasks/pending/`, `tasks/active/`, `tasks/done/`) and `docker ps`. The state file (`harness-state.json`) tracks your decisions across context compactions. Re-read both sources every monitoring cycle — never rely on memory alone.
 
-**Important: never use `cd` in bash commands.** Use absolute paths for everything. `cd` triggers a shell cwd reset in Claude Code that causes an unrecoverable interrupt loop. Instead of `cd /tmp && git clone ...`, write `git clone ... /tmp/foo`.
 
 ---
 
