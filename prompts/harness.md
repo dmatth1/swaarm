@@ -54,10 +54,7 @@ When the user asks you to run swarm for a project:
    ```
    Add `-v <output-dir>/build-cache:/root/.cache` to every worker and reviewer `docker run` command. Workers should install the appropriate cache tool (e.g. `ccache` for C++, `sccache` for Rust) and configure their build system to use it. First build is slow, subsequent builds are near-instant.
 
-8. **Spawn workers** (see Docker Commands). Verify each started:
-   ```bash
-   docker inspect --format='{{.State.Running}}' <container-name>
-   ```
+8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
 
 9. **Write initial `harness-state.json`** (see State File below).
 
