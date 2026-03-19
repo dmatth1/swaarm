@@ -29,6 +29,14 @@ When the user asks you to run swarm for a project:
    ```bash
    cd <repo-dir> && git remote add github <url>
    ```
+   Then add a post-receive hook so every push to the bare repo automatically syncs to GitHub — this way workers, specialists, and orchestrators all push to GitHub indirectly, not just the harness:
+   ```bash
+   cat > <repo-dir>/hooks/post-receive << 'HOOK'
+   #!/bin/bash
+   git push github --all -q 2>/dev/null || true
+   HOOK
+   chmod +x <repo-dir>/hooks/post-receive
+   ```
 
 4. **Run orchestrator** (see Docker Commands below). Wait for it to finish.
 
