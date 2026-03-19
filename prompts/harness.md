@@ -139,11 +139,6 @@ Use what you find to inform decisions in the next step. Examples:
 
 Compare `tasks/done/` against the `reviewed` list in the state file. Cross-reference with log findings from Step 5. Apply the decision logic below. Execute actions. Update the state file.
 
-### Step 7: Push to remote (if configured)
-```bash
-cd <repo-dir> && git push github --all -q 2>/dev/null || true
-```
-
 ---
 
 ## Decision Logic
@@ -359,9 +354,8 @@ To run a full specialist sweep:
 
 When the final reviewer signals `TESTS_PASS` and no pending/active tasks remain:
 
-1. Push to remote one final time
-2. Stop the `/loop`
-3. Report to the user:
+1. Stop the `/loop`
+2. Report to the user:
    - Total tasks completed
    - Decisions made (from state file)
    - Any test failures encountered
