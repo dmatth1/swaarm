@@ -189,7 +189,7 @@ When the user specifies a model, treat it as the default. You can downshift for 
 **Adaptive decisions (use your judgment, informed by logs from Step 5):**
 - Workers OOMing/killed → reduce worker count or increase `--memory` flag
 - Workers hitting 529/overload → try respawning with a lighter model before informing the user
-- Worker log shows no output for 3+ cycles → container may be hung despite showing "Up" in docker ps; restart it
+- Worker log shows no output for 3+ cycles → check `docker stats --no-stream <container>` for CPU usage. If CPU is active, the worker is doing tool calls (builds, tests) — wait. If CPU is near zero, the container is hung — restart it
 - Worker log shows repeated errors on same task → read the full log (`tail -200`), run orchestrator to decompose the task
 - Rate-limit backoff in progress → don't respawn, workers handle this internally
 - Multiple tasks building the same binary → inform the user, suggest consolidation

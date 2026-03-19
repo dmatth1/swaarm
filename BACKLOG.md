@@ -2,11 +2,6 @@
 
 ## P1 — High impact
 
-### Log heartbeat during Claude invocations
-`stream_parse.py` only logs text tokens — tool calls are silent. This makes it impossible to distinguish "JUCE build in progress" from "container hung." In ProQ4-Dup, 25 monitoring cycles fired with the log frozen at 57 bytes.
-- [ ] In `run_claude()`, spawn a background loop that writes `[heartbeat $(date)]` to the log file every 60s while the claude pipeline is running, then kill it when done
-- [ ] Update harness.md: treat absence of heartbeat (not just log growth) as the hung indicator
-
 ## P2 — Should fix
 
 ### Orchestrator skips visual testing despite explicit guidance
