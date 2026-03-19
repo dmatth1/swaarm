@@ -48,14 +48,20 @@ When the user asks you to run swarm for a project:
 
 6. **Run a specialist sweep** before spawning workers. This catches planning issues (wrong decomposition, missing tasks, architectural problems) before workers start building on a flawed plan. Follow the Specialist Sweep procedure (all specialists parallel, then PM solo).
 
-7. **Spawn workers** (see Docker Commands). Verify each started:
+7. **Set up shared build cache** (if the project compiles code — C++, Rust, Java, Go, etc.):
+   ```bash
+   mkdir -p <output-dir>/build-cache
+   ```
+   Add `-v <output-dir>/build-cache:/root/.cache` to every worker and reviewer `docker run` command. Workers should install the appropriate cache tool (e.g. `ccache` for C++, `sccache` for Rust) and configure their build system to use it. First build is slow, subsequent builds are near-instant.
+
+8. **Spawn workers** (see Docker Commands). Verify each started:
    ```bash
    docker inspect --format='{{.State.Running}}' <container-name>
    ```
 
-8. **Write initial `harness-state.json`** (see State File below).
+9. **Write initial `harness-state.json`** (see State File below).
 
-9. **Start monitoring immediately** — invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
+10. **Start monitoring immediately** — invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
 
 ---
 
@@ -208,8 +214,6 @@ When the user specifies a model, treat it as the default. You can downshift for 
 - Orchestrator augmenting after test failures → `EXTRA_GUIDANCE="Tests are failing on auth middleware. Prioritize fix tasks for src/auth/."`
 
 The base prompts are the constitution. `EXTRA_GUIDANCE` is your situational briefing.
-
-**Build artifact caching →** If the project has expensive builds (C++, Rust, large Java/Gradle projects) and multiple containers will build the same code (workers + reviewers), create a shared cache directory on the host and mount it into every container (e.g. `-v /tmp/swarm-cache:/root/.cache`). This lets later containers reuse compiled artifacts from earlier ones. Install the appropriate cache tool in the container via `EXTRA_GUIDANCE` (e.g. "install ccache and configure cmake to use it"). First build pays full cost, subsequent builds are near-instant.
 
 ---
 
