@@ -201,6 +201,8 @@ When the user specifies a model, treat it as the default. You can downshift for 
 
 The base prompts are the constitution. `EXTRA_GUIDANCE` is your situational briefing.
 
+**Build artifact caching →** If the project has expensive builds (C++, Rust, large Java/Gradle projects) and multiple containers will build the same code (workers + reviewers), create a shared cache directory on the host and mount it into every container (e.g. `-v /tmp/swarm-cache:/root/.cache`). This lets later containers reuse compiled artifacts from earlier ones. Install the appropriate cache tool in the container via `EXTRA_GUIDANCE` (e.g. "install ccache and configure cmake to use it"). First build pays full cost, subsequent builds are near-instant.
+
 ---
 
 ## Docker Commands
