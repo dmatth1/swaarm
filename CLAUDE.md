@@ -90,7 +90,7 @@ Workers have passwordless sudo — they can `sudo apt-get install` packages as n
 - **`EXTRA_GUIDANCE` env var**: harness injects situational context into any agent's prompt without modifying base prompt files. Used for failure recovery hints, focus areas, prior error context.
 - **Stateless worker invocations**: each `claude` call re-reads everything from git. State is only in the repo.
 - **Rate-limit backoff**: workers detect 429/"too many requests" and sleep with exponential backoff (5m→4hr ±20% jitter)
-- **Invocation timeout**: `run_claude()` wraps `claude` with `timeout $CLAUDE_TIMEOUT` (default 30m). Kills hung invocations.
+- **No invocation timeout**: the harness detects hung containers via `docker stats` (CPU activity). No artificial time limit on Claude invocations.
 - **Log rotation**: caps log files at 10MB, keeps the tail
 - **Specialists audit and create tasks**: may build/run the project to inspect it, but create tasks for issues rather than fixing them directly. ProjectManager runs last to consolidate.
 - **Remote repo mirroring**: harness pushes to GitHub each cycle. `PUBLIC_REPO=true` triggers security notice.

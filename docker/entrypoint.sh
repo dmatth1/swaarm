@@ -58,11 +58,10 @@ truncate_log() {
 # arrive (no PTY needed — streaming is built into the CLI flag).
 # stream_parse.py writes text chunks to log in real-time and saves the final
 # result text to CLAUDE_OUTPUT_FILE for signal/rate-limit grep afterwards.
-# CLAUDE_TIMEOUT (default 30m) kills hung invocations — covers all roles.
+# No invocation timeout — the harness detects hung containers via docker stats.
 run_claude() {
     local _rc_prompt="$1"
     local _rc_log="$2"
-    local _rc_timeout="${CLAUDE_TIMEOUT:-1800}"
 
     local _rc_prompt_file
     _rc_prompt_file=$(mktemp)
@@ -70,23 +69,12 @@ run_claude() {
 
     CLAUDE_OUTPUT_FILE=$(mktemp)
 
-    # Use timeout when available (GNU coreutils — present in Docker, not on macOS)
-    local _rc_timeout_cmd=""
-    if command -v timeout &>/dev/null; then
-        _rc_timeout_cmd="timeout $_rc_timeout"
-    fi
-
-    $_rc_timeout_cmd \
     claude --dangerously-skip-permissions $CLAUDE_MODEL_FLAG -p \
         --output-format stream-json --verbose --include-partial-messages \
         < "$_rc_prompt_file" 2>&1 | \
     python3 "$(dirname "$0")/stream_parse.py" "$CLAUDE_OUTPUT_FILE" "$_rc_log" || {
         local _rc_exit=$?
-        if [[ "$_rc_exit" -eq 124 ]]; then
-            echo "[timeout] claude invocation killed after ${_rc_timeout}s" >> "$_rc_log"
-        else
-            echo "[stream_parse error] pipeline failed (exit $_rc_exit)" >> "$_rc_log"
-        fi
+        echo "[stream_parse error] pipeline failed (exit $_rc_exit)" >> "$_rc_log"
     }
 
     rm -f "$_rc_prompt_file"
