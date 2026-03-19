@@ -38,14 +38,16 @@ When the user asks you to run swarm for a project:
    ```
    If no tasks, check `<logs-dir>/orchestrator.log` for errors.
 
-6. **Spawn workers** (see Docker Commands). Verify each started:
+6. **Run a specialist sweep** before spawning workers. This catches planning issues (wrong decomposition, missing tasks, architectural problems) before workers start building on a flawed plan. Follow the Specialist Sweep procedure (all specialists parallel, then PM solo).
+
+7. **Spawn workers** (see Docker Commands). Verify each started:
    ```bash
    docker inspect --format='{{.State.Running}}' <container-name>
    ```
 
-7. **Write initial `harness-state.json`** (see State File below).
+8. **Write initial `harness-state.json`** (see State File below).
 
-8. **Start monitoring immediately** — invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
+9. **Start monitoring immediately** — invoke `/loop 1m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
 
 ---
 
@@ -72,9 +74,11 @@ When the user says "resume" or points to an existing output directory:
    git push origin main
    ```
 
-4. **Spawn workers** if pending > 0.
+4. **If the user provides new guidance** (not a simple resume), run the orchestrator in augment mode to create new tasks, then run a specialist sweep before spawning workers — same as a new run.
 
-5. **Start monitoring immediately** — invoke `/loop 1m`. **Do not skip this.** Even if you're waiting for an orchestrator to finish, the loop handles everything from there.
+5. **Spawn workers** if pending > 0.
+
+6. **Start monitoring immediately** — invoke `/loop 1m`. **Do not skip this.** Even if you're waiting for an orchestrator to finish, the loop handles everything from there.
 
 ---
 
