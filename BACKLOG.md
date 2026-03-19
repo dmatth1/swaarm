@@ -16,10 +16,6 @@ The orchestrator was told to install Xvfb and test the UI visually before creati
 - [ ] In harness.md monitoring guidance: if a reviewer/specialist was launched within the last 10 minutes and log is still at header size, skip detailed checks and just push to remote
 - [ ] Or: use `/loop 5m` when entering final drain instead of 1m
 
-### Early specialist sweeps for complex projects
-Specialists found serious threading data races, audio thread violations, and wrong filter math — but only during final sweeps, after workers had already built more code on top of the bugs. Earlier sweeps would catch these when they're cheaper to fix.
-- [ ] Update harness.md decision logic: "for projects with complex concurrent architecture (C++, multi-threaded, audio/realtime), run a specialist sweep at ~30% and ~60% completion in addition to the periodic sweep cadence"
-
 ## P3 — Later (cloud prep)
 
 ### Cost/token tracking
