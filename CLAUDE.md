@@ -92,7 +92,7 @@ Workers have passwordless sudo — they can `sudo apt-get install` packages as n
 - **Rate-limit backoff**: workers detect 429/"too many requests" and sleep with exponential backoff (5m→4hr ±20% jitter)
 - **Invocation timeout**: `run_claude()` wraps `claude` with `timeout $CLAUDE_TIMEOUT` (default 30m). Kills hung invocations.
 - **Log rotation**: caps log files at 10MB, keeps the tail
-- **Specialists audit-only**: create tasks, don't write code. ProjectManager runs last to consolidate.
+- **Specialists audit and create tasks**: may build/run the project to inspect it, but create tasks for issues rather than fixing them directly. ProjectManager runs last to consolidate.
 - **Remote repo mirroring**: harness pushes to GitHub each cycle. `PUBLIC_REPO=true` triggers security notice.
 
 ## Common Failure Modes
