@@ -36,7 +36,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
     OAUTH_TOKEN=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
         | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null) || true
 else
-    creds_file="$HOME/.claude/credentials.json"
+    # Claude Code stores credentials as .credentials.json (dot-prefixed) or credentials.json
+    creds_file="$HOME/.claude/.credentials.json"
+    [[ ! -f "$creds_file" ]] && creds_file="$HOME/.claude/credentials.json"
     if [[ -f "$creds_file" ]]; then
         OAUTH_TOKEN=$(python3 -c "import json; print(json.load(open('$creds_file')).get('claudeAiOauth',{}).get('accessToken',''))" 2>/dev/null) || true
     fi
