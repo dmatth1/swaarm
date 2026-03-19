@@ -6,6 +6,10 @@ set -euo pipefail
 # Unset CLAUDECODE to allow nested Claude sessions
 unset CLAUDECODE 2>/dev/null || true
 
+# Mark /upstream as safe (owned by host user, not container user)
+git config --global --add safe.directory /upstream
+git config --global --add safe.directory /workspace
+
 ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
     echo "Usage: /entrypoint.sh orchestrator | worker <agent-id>" >&2
