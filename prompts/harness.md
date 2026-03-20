@@ -48,16 +48,11 @@ When the user asks you to run swarm for a project:
 
 6. **Run a specialist sweep** before spawning workers. This catches planning issues (wrong decomposition, missing tasks, architectural problems) before workers start building on a flawed plan. Follow the Specialist Sweep procedure (all specialists parallel, then PM solo).
 
-7. **Set up shared build cache** (if the project compiles code — C++, Rust, Java, Go, etc.):
+7. **Set up shared build cache** (if the project has expensive builds):
    ```bash
    mkdir -p <output-dir>/build-cache
    ```
-   Add these flags to every worker and reviewer `docker run` command:
-   - `-v <output-dir>/build-cache:/root/.cache` — shared cache volume
-   - `-e PATH="/usr/lib/ccache:$PATH"` — routes gcc/g++ through ccache wrappers (for C/C++ projects)
-   - `-e CCACHE_DIR=/root/.cache` — points ccache at the shared volume
-
-   First build populates the cache, subsequent builds are near-instant. For non-C++ projects (Rust, Go, etc.), use `EXTRA_GUIDANCE` to tell workers to install and configure the appropriate cache tool (e.g. `sccache`).
+   Mount `-v <output-dir>/build-cache:/root/.cache` into every worker and reviewer container. Use env vars and `EXTRA_GUIDANCE` to configure the appropriate caching tool for the project's language/build system. First build populates the cache, subsequent builds are near-instant.
 
 8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
 
