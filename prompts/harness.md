@@ -116,7 +116,7 @@ Use your judgment, informed by logs from Step 2.
 
 **Worker count** — the user's number is a maximum. Match workers to available parallelism (tasks without unsatisfied dependencies). Scale down when pending drops. Scale up when orchestrator adds new tasks. Never exceed the maximum. Log scaling decisions.
 
-**Model selection** — pick per role and task complexity. Orchestrator gets the strongest model (highest leverage). Workers match to task difficulty. Reviewers and specialists can use lighter models. User's model is the ceiling — downshift for simple work, never upshift. Log model choices.
+**Model selection** — pick per role and task complexity. Orchestrator and specialists get the strongest model (highest leverage — bad plans and missed bugs are expensive). Workers match to task difficulty. Reviewers can use a lighter model (they run tests and report pass/fail). User's model is the ceiling — downshift for simple work, never upshift. Log model choices.
 
 **Failure recovery:**
 - OOMing/killed → reduce workers or increase `--memory`
