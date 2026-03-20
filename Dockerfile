@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     sudo \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI
