@@ -51,8 +51,16 @@ When the user asks you to run swarm for a project:
 7. **Set up shared build cache** (if the project has expensive builds):
    ```bash
    mkdir -p <output-dir>/build-cache
+   chown 1001:1001 <output-dir>/build-cache   # match the swarm user UID inside containers
    ```
-   Mount `-v <output-dir>/build-cache:/root/.cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` and/or `EXTRA_GUIDANCE` to configure it for the project's build system. First build populates the cache, subsequent builds are near-instant.
+   Mount `-v <output-dir>/build-cache:/build-cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` (e.g. `-e CCACHE_DIR=/build-cache`) and/or `EXTRA_GUIDANCE` to configure it for the project's build system. First build populates the cache, subsequent builds are near-instant.
+
+   After the first worker completes a build, verify the cache is working:
+   ```bash
+   docker exec <worker-container> ccache --show-stats 2>/dev/null | head -5
+   du -sh <output-dir>/build-cache/
+   ```
+   If the cache is empty or shows 0 hits after multiple builds, check permissions (`ls -la <output-dir>/build-cache/`) and that the build system is actually routing through ccache.
 
 8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
 
