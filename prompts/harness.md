@@ -52,7 +52,7 @@ When the user asks you to run swarm for a project:
    ```bash
    mkdir -p <output-dir>/build-cache
    ```
-   Mount `-v <output-dir>/build-cache:/root/.cache` into every worker and reviewer container. Use env vars and `EXTRA_GUIDANCE` to configure the appropriate caching tool for the project's language/build system. First build populates the cache, subsequent builds are near-instant.
+   Mount `-v <output-dir>/build-cache:/root/.cache` into every worker and reviewer container. Then use `EXTRA_GUIDANCE` to tell agents to install and configure the appropriate build cache tool for the project. For example: `"Install ccache (sudo apt-get install -y ccache) and configure it: export PATH=/usr/lib/ccache:$PATH && export CCACHE_DIR=/root/.cache. Run this before any build commands."` First build populates the cache, subsequent builds are near-instant.
 
 8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
 
