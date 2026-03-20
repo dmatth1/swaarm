@@ -52,7 +52,12 @@ When the user asks you to run swarm for a project:
    ```bash
    mkdir -p <output-dir>/build-cache
    ```
-   Add `-v <output-dir>/build-cache:/root/.cache` to every worker and reviewer `docker run` command. Workers should install the appropriate cache tool (e.g. `ccache` for C++, `sccache` for Rust) and configure their build system to use it. First build is slow, subsequent builds are near-instant.
+   Add these flags to every worker and reviewer `docker run` command:
+   - `-v <output-dir>/build-cache:/root/.cache` — shared cache volume
+   - `-e PATH="/usr/lib/ccache:$PATH"` — routes gcc/g++ through ccache wrappers (for C/C++ projects)
+   - `-e CCACHE_DIR=/root/.cache` — points ccache at the shared volume
+
+   First build populates the cache, subsequent builds are near-instant. For non-C++ projects (Rust, Go, etc.), use `EXTRA_GUIDANCE` to tell workers to install and configure the appropriate cache tool (e.g. `sccache`).
 
 8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
 
