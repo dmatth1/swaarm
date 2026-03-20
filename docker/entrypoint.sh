@@ -24,7 +24,7 @@ fi
 
 # Timeout for git operations in seconds (default 30s).
 # Covers clone/pull/push — prevents hung network or filesystem ops.
-GIT_TIMEOUT="${GIT_TIMEOUT:-30}"
+GIT_TIMEOUT="${GIT_TIMEOUT:-120}"
 
 # Wrapper for git operations with timeout.
 # Uses GNU timeout when available (Docker/Linux), falls back to plain git (macOS).
