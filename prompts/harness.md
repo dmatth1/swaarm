@@ -7,9 +7,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 ---
 
-## Starting a New Run
-
-When the user asks you to run swarm for a project:
+## Starting or Resuming a Run
 
 1. **Determine parameters** from the user's request:
    - Task description (what to build)
@@ -21,15 +19,18 @@ When the user asks you to run swarm for a project:
 
 2. **Run setup:**
    ```bash
+   # New run:
    bash swarm-setup.sh <output-dir> --new
+   # Resume:
+   bash swarm-setup.sh <output-dir> --resume
    ```
    Capture the output — it contains `SWARM_OUTPUT_DIR`, `SWARM_REPO_DIR`, `SWARM_MAIN_DIR`, `SWARM_LOGS_DIR`, `SWARM_OAUTH_TOKEN`, `SWARM_PROMPTS_DIR`.
 
-3. **Configure remote** (if repo URL provided):
+3. **Configure remote** (if repo URL provided and not already configured):
    ```bash
    cd <repo-dir> && git remote add github <url>
    ```
-   Then add a post-receive hook so every push to the bare repo automatically syncs to GitHub — this way workers, specialists, and orchestrators all push to GitHub indirectly, not just the harness:
+   Then add a post-receive hook so every push to the bare repo automatically syncs to GitHub:
    ```bash
    cat > <repo-dir>/hooks/post-receive << 'HOOK'
    #!/bin/bash
@@ -38,17 +39,30 @@ When the user asks you to run swarm for a project:
    chmod +x <repo-dir>/hooks/post-receive
    ```
 
-4. **Run orchestrator** (see Docker Commands below). Wait for it to finish.
+4. **Read current state** — sync and scan:
+   ```bash
+   cd <main-dir> && git pull origin main -q
+   ls tasks/pending/ tasks/active/ tasks/done/
+   ```
+   On resume, also read `cat <output-dir>/harness-state.json`.
 
-5. **Verify tasks created:**
+5. **Return stuck tasks** (resume only): for any files in `tasks/active/`, check if their worker container is alive via `docker ps`. If dead, move the task back to pending:
+   ```bash
+   # In a temp clone of repo.git
+   git mv tasks/active/worker-N--NNN-task.md tasks/pending/NNN-task.md
+   git commit -m "harness: return stuck task to pending"
+   git push origin main
+   ```
+
+6. **Run orchestrator** if needed (new run, or resume with new guidance from the user). Wait for it to finish. Verify tasks created:
    ```bash
    ls <main-dir>/tasks/pending/
    ```
    If no tasks, check `<logs-dir>/orchestrator.log` for errors.
 
-6. **Run a specialist sweep** before spawning workers. This catches planning issues (wrong decomposition, missing tasks, architectural problems) before workers start building on a flawed plan. Follow the Specialist Sweep procedure (all specialists parallel, then PM solo).
+7. **Run a specialist sweep** after orchestration (new run or augment). This catches planning issues before workers start building on a flawed plan. Follow the Specialist Sweep procedure (all specialists parallel, then PM solo). Skip this only on a simple resume with no orchestrator run.
 
-7. **Set up shared build cache** (if the project has expensive builds):
+8. **Set up shared build cache** (if the project has expensive builds):
    ```bash
    mkdir -p <output-dir>/build-cache
    chown 1001:1001 <output-dir>/build-cache   # match the swarm user UID inside containers
@@ -62,42 +76,11 @@ When the user asks you to run swarm for a project:
    ```
    If the cache is empty or shows 0 hits after multiple builds, check permissions (`ls -la <output-dir>/build-cache/`) and that the build system is actually routing through ccache.
 
-8. **Spawn workers** (see Docker Commands). If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache with compiled artifacts. Then spawn the remaining workers, which will get near-instant builds from the cache. Without this, all workers do cold builds in parallel and the cache is useless until the second round.
+9. **Spawn workers** if pending > 0. If using a shared build cache, spawn **one worker first** and wait for it to complete its first task — this populates the cache. Then spawn the remaining workers.
 
-9. **Write initial `harness-state.json`** (see State File below).
+10. **Write or update `harness-state.json`** (see State File below).
 
-10. **Start monitoring immediately** — invoke `/loop 5m` with the monitoring prompt (see Monitoring Cycle below). **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
-
----
-
-## Resuming a Run
-
-When the user says "resume" or points to an existing output directory:
-
-1. **Run setup:**
-   ```bash
-   bash swarm-setup.sh <output-dir> --resume
-   ```
-
-2. **Read state:** `cat <output-dir>/harness-state.json` and scan git:
-   ```bash
-   cd <main-dir> && git pull origin main -q
-   ls tasks/pending/ tasks/active/ tasks/done/
-   ```
-
-3. **Return stuck tasks:** For any files in `tasks/active/`, check if their worker container is alive via `docker ps`. If dead, move the task back to pending:
-   ```bash
-   # In a temp clone of repo.git
-   git mv tasks/active/worker-N--NNN-task.md tasks/pending/NNN-task.md
-   git commit -m "harness: return stuck task to pending"
-   git push origin main
-   ```
-
-4. **If the user provides new guidance** (not a simple resume), run the orchestrator in augment mode to create new tasks, then run a specialist sweep before spawning workers — same as a new run.
-
-5. **Spawn workers** if pending > 0.
-
-6. **Start monitoring immediately** — invoke `/loop 5m`. **Do not skip this.** Even if you're waiting for an orchestrator to finish, the loop handles everything from there.
+11. **Start monitoring immediately** — invoke `/loop 5m`. **Do not forget this step.** The run cannot progress without the monitoring loop — it handles reviews, specialist sweeps, dead worker recovery, and completion detection.
 
 ---
 
