@@ -10,9 +10,6 @@ unset CLAUDECODE 2>/dev/null || true
 git config --global --add safe.directory /upstream
 git config --global --add safe.directory /workspace
 
-# Enable ccache — prepend /usr/lib/ccache to PATH so gcc/g++ resolve to ccache wrappers
-[[ -d /usr/lib/ccache ]] && export PATH="/usr/lib/ccache:$PATH"
-
 ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
     echo "Usage: /entrypoint.sh orchestrator | worker <agent-id>" >&2
