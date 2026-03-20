@@ -11,7 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     sudo \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
+
+# ccache config: store cache at /build-cache (mounted from host), auto-use for cmake
+ENV CCACHE_DIR=/build-cache
+ENV CMAKE_C_COMPILER_LAUNCHER=ccache
+ENV CMAKE_CXX_COMPILER_LAUNCHER=ccache
 
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
