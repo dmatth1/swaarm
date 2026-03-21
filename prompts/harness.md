@@ -45,7 +45,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 5. **Return stuck tasks** (resume only): for any files in `tasks/active/`, check if their worker container is alive via `docker ps`. If dead, move the task back to pending (git mv, commit, push in a temp clone of repo.git).
 
-6. **Run orchestrator** if needed (new run, or resume with new guidance from the user). Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
+6. **Run orchestrator** if needed (new run, or resume with new guidance from the user). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
 7. **Run a specialist sweep** after orchestration (new run or augment). Catches planning issues before workers start. Skip only on a simple resume with no orchestrator run. See Specialist Sweep below.
 
@@ -93,7 +93,7 @@ Apply the decision logic below. Execute actions. Update the state file.
 
 Apply in order each cycle. Use judgment — these are guidelines, not rigid rules.
 
-**New completions →** For each task in `tasks/done/` not in the state file's `reviewed` list, decide whether to review now or defer. The final drain runs a full test suite regardless. Consider resource pressure, recent pass/fail history, unreviewed backlog size, and whether the task touches critical code. When reviewing: run a reviewer container, check log for `TESTS_PASS`/`TESTS_FAIL`, add to `reviewed` list. If `TESTS_FAIL`: run orchestrator in augment mode.
+**New completions →** For each task in `tasks/done/` not in the state file's `reviewed` list, decide whether to review now or defer. The final drain runs a full test suite regardless. Consider resource pressure, recent pass/fail history, unreviewed backlog size, and whether the task touches critical code. When reviewing: run a reviewer container, check log for `TESTS_PASS`/`TESTS_FAIL`, add to `reviewed` list. If `TESTS_FAIL`: update phase to `"orchestrating"`, run orchestrator in augment mode, then update phase to `"workers_running"`.
 
 **Dead workers →** If `docker ps` shows fewer workers than expected and tasks remain: return stuck tasks to pending, respawn the worker, log the decision.
 
@@ -188,7 +188,7 @@ Always run ProjectManager last (after all other specialists complete).
 }
 ```
 
-- `phase`: current run phase — `workers_running`, `specialist_sweep`, `final_review`, or `complete`. **Read this first each cycle** to know where you are after context compaction
+- `phase`: current run phase — `orchestrating`, `workers_running`, `specialist_sweep`, `final_review`, or `complete`. **Read this first each cycle** to know where you are after context compaction
 - `reviewed`: tasks that have been through a reviewer
 - `review_count`: incrementing counter for reviewer container naming
 - `last_sweep_at_done_count`: done count at last periodic sweep
