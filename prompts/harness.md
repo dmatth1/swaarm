@@ -104,7 +104,7 @@ Apply in order each cycle. Use judgment — these are guidelines, not rigid rule
 2. Sync main — if specialists created new tasks, spawn workers and continue monitoring. Update state file: `"phase": "workers_running"`.
 3. **Repeat**: when workers finish the new tasks (pending = 0, active = 0 again), run another specialist sweep. Keep looping until a specialist sweep creates zero new tasks.
 4. Only when a sweep produces no new tasks: run final reviewer with `COMPLETED_TASK=--final--`. Update state file: `"phase": "final_review"`.
-5. If `TESTS_PASS`: **validate against the original prompt.** Re-read the `task` field from `harness-state.json` and check the project in `<main-dir>/` — does the built project actually fulfill what the user asked for? Clone the repo, read key files, compare against the original request. If there are gaps (missing features, incomplete functionality, requirements not met), run the orchestrator in augment mode with `EXTRA_GUIDANCE` describing what's missing, spawn workers, and continue monitoring.
+5. If `TESTS_PASS`: **validate against the original prompt.** Re-read `original_task` (and `latest_guidance` if set) from `harness-state.json` and check the project in `<main-dir>/` — does the built project actually fulfill what the user asked for? Clone the repo, read key files, compare against the original request. If there are gaps (missing features, incomplete functionality, requirements not met), run the orchestrator in augment mode with `EXTRA_GUIDANCE` describing what's missing, spawn workers, and continue monitoring.
 6. If everything matches the original prompt: report results to the user (total tasks, decisions, failures, file locations) and stop the `/loop`. Update state file: `"phase": "complete"`.
 7. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring. Update state file: `"phase": "workers_running"`.
 
@@ -168,7 +168,8 @@ Always run ProjectManager last (after all other specialists complete).
 ```json
 {
   "run_id": "swarm-20240115-143022",
-  "task": "Build a REST API todo app with SQLite",
+  "original_task": "Build a REST API todo app with SQLite",
+  "latest_guidance": "Also add rate limiting and auth",
   "phase": "workers_running",
   "agents": 3,
   "model": "opus[1m]",
@@ -189,6 +190,8 @@ Always run ProjectManager last (after all other specialists complete).
 }
 ```
 
+- `original_task`: the user's initial prompt — set once at run start, never overwritten. Used for final validation
+- `latest_guidance`: the most recent user guidance on resume/augment (may be empty)
 - `phase`: current run phase — `orchestrating`, `workers_running`, `specialist_sweep`, `final_review`, or `complete`. **Read this first each cycle** to know where you are after context compaction
 - `reviewed`: tasks that have been through a reviewer
 - `review_count`: incrementing counter for reviewer container naming
