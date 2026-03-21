@@ -374,6 +374,15 @@ ${EXTRA_GUIDANCE}"
                 continue
             fi
 
+            # TASK_DONE = completed one task. Loop back to claim the next one
+            # instead of exiting — the outer while loop handles "no work left".
+            if grep -q "TASK_DONE" "$CLAUDE_OUTPUT_FILE" 2>/dev/null; then
+                echo "Worker $agent_id: task complete, looping for next" >> "$log_file"
+                rm -f "$CLAUDE_OUTPUT_FILE"
+                sleep 2
+                continue
+            fi
+
             # NO_TASKS with pending work remaining = git push race, not real completion.
             # Pull fresh state and recheck before exiting.
             if grep -q "NO_TASKS" "$CLAUDE_OUTPUT_FILE" 2>/dev/null; then
@@ -388,6 +397,7 @@ ${EXTRA_GUIDANCE}"
                 fi
             fi
 
+            # ALL_DONE or NO_TASKS with nothing pending — exit cleanly
             echo "Worker $agent_id: signaled completion" >> "$log_file"
             echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
             rm -f "$CLAUDE_OUTPUT_FILE"
