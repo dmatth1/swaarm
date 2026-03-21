@@ -60,7 +60,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 10. **Write or update `harness-state.json`** (see State File below).
 
-11. **Start monitoring immediately** — invoke `/loop 5m`. **Do not forget this step.**
+11. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.** The run cannot progress without the monitoring loop.
 
 ---
 
@@ -100,13 +100,14 @@ Apply in order each cycle. Use judgment — these are guidelines, not rigid rule
 **Periodic specialist sweep →** Use judgment on timing based on project size and complexity. Guideline: every 5–10 completions. Confirm all workers are gone via `docker ps` before starting (workers with no tasks exit on their own — wait, don't kill unless stuck). Run all specialists parallel except ProjectManager, then PM solo. Spawn workers only after PM finishes.
 
 **Final drain →** When pending = 0, active = 0, no reviewers running — **act immediately, do not ask the user:**
-1. Run final specialist sweep (mandatory). Do not spawn workers until PM finishes.
-2. Sync main — if specialists created new tasks, spawn workers and continue monitoring.
-3. If still pending = 0: run final reviewer with `COMPLETED_TASK=--final--`.
-4. If `TESTS_PASS`: report results to the user (total tasks, decisions, failures, file locations) and stop the `/loop`.
-5. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring.
+1. **Always run specialist sweep first** (mandatory — never skip). Do not spawn workers until PM finishes. Update state file: `"phase": "specialist_sweep"`.
+2. Sync main — if specialists created new tasks, spawn workers and continue monitoring. Update state file: `"phase": "workers_running"`.
+3. **Repeat**: when workers finish the new tasks (pending = 0, active = 0 again), run another specialist sweep. Keep looping until a specialist sweep creates zero new tasks.
+4. Only when a sweep produces no new tasks: run final reviewer with `COMPLETED_TASK=--final--`. Update state file: `"phase": "final_review"`.
+5. If `TESTS_PASS`: report results to the user (total tasks, decisions, failures, file locations) and stop the `/loop`. Update state file: `"phase": "complete"`.
+6. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue monitoring. Update state file: `"phase": "workers_running"`.
 
-**Never ask "should I run a sweep?" or "should I continue?" — just do it.**
+**Never ask "should I run a sweep?" or "should I continue?" — just do it.** The run is not done until specialists find nothing new AND the final reviewer passes.
 
 ---
 
@@ -161,12 +162,13 @@ Always run ProjectManager last (after all other specialists complete).
 
 ## State File
 
-`<output-dir>/harness-state.json` — read and write every monitoring cycle. **Never store the OAuth token.**
+`<output-dir>/harness-state.json` — **this is your primary memory**. Read it at the start of every monitoring cycle to reconstruct what phase the run is in. After context compaction, this file is how you know what's been done. **Never store the OAuth token.** Re-extract it from `swarm-setup.sh --resume` each session.
 
 ```json
 {
   "run_id": "swarm-20240115-143022",
   "task": "Build a REST API todo app with SQLite",
+  "phase": "workers_running",
   "agents": 3,
   "model": "opus[1m]",
   "repo": "https://github.com/user/repo",
@@ -186,6 +188,7 @@ Always run ProjectManager last (after all other specialists complete).
 }
 ```
 
+- `phase`: current run phase — `workers_running`, `specialist_sweep`, `final_review`, or `complete`. **Read this first each cycle** to know where you are after context compaction
 - `reviewed`: tasks that have been through a reviewer
 - `review_count`: incrementing counter for reviewer container naming
 - `last_sweep_at_done_count`: done count at last periodic sweep
