@@ -93,7 +93,7 @@ Workers have passwordless sudo — they can `sudo apt-get install` packages as n
 - **No invocation timeout**: the harness detects hung containers via `docker stats` (CPU activity). No artificial time limit on Claude invocations.
 - **Log rotation**: caps log files at 10MB, keeps the tail
 - **Specialists audit and create tasks**: may build/run the project to inspect it, but create tasks for issues rather than fixing them directly. ProjectManager runs last to consolidate.
-- **Remote repo mirroring**: harness pushes to GitHub each cycle. `PUBLIC_REPO=true` triggers security notice.
+- **Remote repo mirroring**: post-receive hook on bare repo auto-pushes to GitHub on every agent commit. `PUBLIC_REPO=true` triggers security notice.
 
 ## Common Failure Modes
 

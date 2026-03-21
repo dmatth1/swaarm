@@ -88,7 +88,7 @@ Talk to Claude Code naturally:
 - **Number of agents** (default 3 — the harness treats this as a maximum and scales dynamically)
 - **Model** (default sonnet, e.g. "opus", "opus[1m]" — harness may downshift for simpler tasks)
 - **Output directory** (default swarm-TIMESTAMP)
-- **Remote repo** (optional GitHub URL — harness pushes each monitoring cycle, agents get a security notice prohibiting secrets/PII)
+- **Remote repo** (optional GitHub URL — every agent commit auto-syncs to GitHub via post-receive hook, agents get a security notice prohibiting secrets/PII)
 - **Extra mounts** (optional, e.g. reference docs or screenshots)
 
 ### Resuming and recovery
