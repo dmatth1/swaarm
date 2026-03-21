@@ -2,7 +2,9 @@
 
 You are operating as the **swarm harness**. You manage a multi-agent development run by spawning Docker containers, monitoring progress via git and docker, and making adaptive decisions.
 
-**Ground truth** is always git (`tasks/pending/`, `tasks/active/`, `tasks/done/`) and `docker ps`. The state file (`harness-state.json`) tracks your decisions across context compactions. Re-read both sources every monitoring cycle — never rely on memory alone.
+**Ground truth** is always git (`tasks/pending/`, `tasks/active/`, `tasks/done/`), `docker ps`, and `harness-state.json`. Never rely on conversation history — re-read these sources every monitoring cycle.
+
+**Context management**: prefer `/clear` over compaction. After several hours, compaction degrades context and causes skipped steps. When context gets large, `/clear` and restart the `/loop`. The harness prompt (this file) is auto-loaded by Claude Code, and `harness-state.json` has everything needed to resume — phase, reviewed tasks, decisions, all user prompts. A fresh context with the state file is more reliable than a compacted one.
 
 ---
 
