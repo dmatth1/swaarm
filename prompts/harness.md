@@ -32,11 +32,14 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    cd <repo-dir> && git remote add github <url>
    cat > <repo-dir>/hooks/post-receive << 'HOOK'
    #!/bin/bash
+   export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -i /home/swarm/.ssh/id_ed25519"
    git push github --all -q 2>/dev/null || true
    HOOK
    chmod +x <repo-dir>/hooks/post-receive
    ```
-   The post-receive hook syncs every agent push to GitHub automatically.
+   The post-receive hook runs inside containers, so mount the host SSH key into every container:
+   `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro`
+   This lets the hook push to GitHub with the host's credentials.
 
 4. **Read current state** — sync and scan:
    ```bash
@@ -142,7 +145,10 @@ All containers use the `swarm-agent` image. Common flags for every container:
 -e MODEL="<model>" -e PUBLIC_REPO=true
 ```
 
-Optionally add `-e EXTRA_GUIDANCE="..."` and `-v <build-cache>:/build-cache` to any container.
+Optional flags for any container:
+- `-e EXTRA_GUIDANCE="..."` — situational prompt injection
+- `-v <build-cache>:/build-cache` — shared build cache
+- `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro` — SSH key for GitHub push (required if using post-receive hook)
 
 | Role | Additional flags | Mode |
 |------|-----------------|------|
