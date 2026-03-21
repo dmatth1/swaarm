@@ -61,7 +61,7 @@ If it requires tasks that aren't in `tasks/done/` yet, skip it and try the next 
 
 ### Step 5: Claim the Task
 
-Pick the **lowest-numbered** available task whose dependencies are met.
+Pick a **random** available task whose dependencies are met. Do NOT always pick the lowest-numbered task — this causes all workers to race for the same task and creates git push conflicts. Instead, choose randomly from the set of unblocked tasks.
 
 ```bash
 mv tasks/pending/NNN-task-name.md tasks/active/{{AGENT_ID}}--NNN-task-name.md

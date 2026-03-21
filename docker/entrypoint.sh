@@ -373,6 +373,21 @@ ${EXTRA_GUIDANCE}"
                 sleep 2
                 continue
             fi
+
+            # NO_TASKS with pending work remaining = git push race, not real completion.
+            # Pull fresh state and recheck before exiting.
+            if grep -q "NO_TASKS" "$CLAUDE_OUTPUT_FILE" 2>/dev/null; then
+                git_t pull origin main -q 2>>"$log_file" || true
+                local recheck_pending
+                recheck_pending=$(find tasks/pending -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+                if [[ "$recheck_pending" -gt 0 ]]; then
+                    echo "Worker $agent_id: NO_TASKS but $recheck_pending pending — retrying (git push race)" >> "$log_file"
+                    rm -f "$CLAUDE_OUTPUT_FILE"
+                    sleep $(( (RANDOM % 5) + 2 ))
+                    continue
+                fi
+            fi
+
             echo "Worker $agent_id: signaled completion" >> "$log_file"
             echo "=== Worker $agent_id DONE at $(date) ===" >> "$log_file"
             rm -f "$CLAUDE_OUTPUT_FILE"
