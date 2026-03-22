@@ -102,7 +102,7 @@ Apply in order each cycle. Use judgment — these are guidelines, not rigid rule
 
 **Dead workers →** If `docker ps` shows fewer workers than expected and tasks remain: return stuck tasks to pending, respawn the worker, log the decision.
 
-**Periodic specialist sweep →** Use judgment on timing based on project size and complexity. Guideline: every 5–10 completions. Confirm all workers are gone via `docker ps` before starting (workers with no tasks exit on their own — wait, don't kill unless stuck). Run all specialists parallel except ProjectManager, then PM solo. Spawn workers only after PM finishes.
+**Periodic specialist sweep →** Use judgment on timing based on project size and complexity. Guideline: every 5–10 completions. **Do not wait for workers to stop** — run the sweep concurrently with workers. Specialists audit the codebase as-is (they clone fresh from the bare repo). Workers may push commits while specialists are running, but specialists handle git conflicts via rebase. After all specialists finish, run PM solo to consolidate. If PM creates cleanup or restructuring tasks, workers will pick them up naturally.
 
 **Final drain →** When pending = 0, active = 0, no reviewers running — **act immediately, do not ask the user:**
 1. **Always run specialist sweep first** (mandatory — never skip). Do not spawn workers until PM finishes. Update state file: `"phase": "specialist_sweep"`.
