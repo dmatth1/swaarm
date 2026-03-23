@@ -130,7 +130,7 @@ Use your judgment, informed by logs from Step 2.
 - 529/overload → respawn with lighter model before informing user
 - No log output for 3+ cycles → check `docker stats --no-stream <container>` for CPU. Active CPU = working (wait). Zero CPU = hung (restart)
 - Repeated errors on same task → read full log (`tail -200`), run orchestrator to decompose
-- Rate-limit backoff → don't respawn, workers handle this internally
+- Rate-limit backoff → workers handle short-term backoff internally. But if logs show **multiple workers** hitting rate limits simultaneously or repeated timeouts across several cycles, downshift all workers to a lighter model (e.g. opus → sonnet). Fewer rate limits = faster overall progress. Log the model switch and switch back when pressure eases
 
 **`EXTRA_GUIDANCE` env var** — inject situational context into any agent's prompt without modifying base files. Examples: paste error output for a failing task, tell reviewer to focus on a problem area, give orchestrator context about test failures. The base prompts are the constitution; `EXTRA_GUIDANCE` is your situational briefing.
 
