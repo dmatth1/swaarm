@@ -56,12 +56,12 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 7. **Run a specialist sweep** after orchestration (new run or augment). Catches planning issues before workers start. Skip only on a simple resume with no orchestrator run. See Specialist Sweep below.
 
-8. **Set up shared build cache** (if the project has expensive builds):
+8. **Set up shared build cache** (if the project has expensive builds). **Do this before spawning any workers:**
    ```bash
    mkdir -p <output-dir>/build-cache
-   chown 1001:1001 <output-dir>/build-cache
+   sudo chown 1001:1001 <output-dir>/build-cache || chmod 777 <output-dir>/build-cache
    ```
-   Mount `-v <output-dir>/build-cache:/build-cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` (e.g. `-e CCACHE_DIR=/build-cache`) and/or `EXTRA_GUIDANCE` to configure it for the project's build system. After the first worker completes a build, verify with `docker exec <container> ccache --show-stats`.
+   Mount `-v <output-dir>/build-cache:/build-cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` (e.g. `-e CCACHE_DIR=/build-cache`) and/or `EXTRA_GUIDANCE` to configure it for the project's build system. After the first worker completes a build, verify with `docker exec <container> ccache --show-stats`. **You cannot add mounts to running containers** — if you miss this step, you must stop and respawn workers.
 
 9. **Spawn workers** if pending > 0. If using build cache, spawn **one worker first**, wait for it to complete its first task (populates the cache), then spawn the rest.
 
