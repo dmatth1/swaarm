@@ -31,7 +31,7 @@ setup_test "setup: new workspace creates correct directory structure"
 trap teardown_test EXIT
 
 output_dir="$TEST_TMPDIR/test-run"
-result=$(bash "$SETUP_SCRIPT" "$output_dir" --new 2>/dev/null)
+result=$(SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new 2>/dev/null)
 
 [[ -d "$output_dir/repo.git" ]] \
     && pass "repo.git created" \
@@ -74,7 +74,7 @@ setup_test "setup: config output contains all required variables"
 trap teardown_test EXIT
 
 output_dir="$TEST_TMPDIR/test-run"
-result=$(bash "$SETUP_SCRIPT" "$output_dir" --new 2>/dev/null)
+result=$(SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new 2>/dev/null)
 
 echo "$result" | grep -q "SWARM_OUTPUT_DIR=" \
     && pass "SWARM_OUTPUT_DIR present" \
@@ -110,13 +110,13 @@ trap teardown_test EXIT
 
 # Create a workspace first
 output_dir="$TEST_TMPDIR/test-run"
-bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
+SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
 
 # Touch a marker file to prove init doesn't re-run
 echo "marker" > "$output_dir/main/MARKER.txt"
 
 # Resume should not overwrite
-result=$(bash "$SETUP_SCRIPT" "$output_dir" --resume 2>/dev/null)
+result=$(SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --resume 2>/dev/null)
 
 [[ -f "$output_dir/main/MARKER.txt" ]] \
     && pass "marker file preserved (no re-init)" \
@@ -135,10 +135,10 @@ setup_test "setup: new run fails if output directory already has tasks"
 trap teardown_test EXIT
 
 output_dir="$TEST_TMPDIR/test-run"
-bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
+SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
 
 # Try --new again on existing dir
-if bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1; then
+if SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1; then
     fail "should have exited non-zero for existing directory"
 else
     pass "exits non-zero for existing directory"
@@ -152,7 +152,7 @@ trap - EXIT
 setup_test "setup: resume fails for non-existent directory"
 trap teardown_test EXIT
 
-if bash "$SETUP_SCRIPT" "$TEST_TMPDIR/nonexistent" --resume >/dev/null 2>&1; then
+if SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$TEST_TMPDIR/nonexistent" --resume >/dev/null 2>&1; then
     fail "should have exited non-zero for missing directory"
 else
     pass "exits non-zero for missing directory"
@@ -167,7 +167,7 @@ setup_test "setup: git repo has initial commit with task directories"
 trap teardown_test EXIT
 
 output_dir="$TEST_TMPDIR/test-run"
-bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
+SWARM_SKIP_DOCKER=1 SWARM_SKIP_AUTH=1 SWARM_SKIP_KEYSCAN=1 bash "$SETUP_SCRIPT" "$output_dir" --new >/dev/null 2>&1
 
 commit_msg=$(cd "$output_dir/main" && git log --oneline -1)
 echo "$commit_msg" | grep -q "init: workspace bootstrap" \

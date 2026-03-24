@@ -18,58 +18,37 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    - Remote repo URL (optional, for GitHub mirroring)
    - Extra mounts (optional, e.g. reference docs)
 
-2. **Run setup:**
+2. **Run setup** (captures output dir, repo dir, logs dir, OAuth token, prompts dir):
    ```bash
-   # New run:
-   bash swarm-setup.sh <output-dir> --new
-   # Resume:
-   bash swarm-setup.sh <output-dir> --resume
+   bash swarm-setup.sh <output-dir> --new     # or --resume
    ```
-   Capture the output — it contains `SWARM_OUTPUT_DIR`, `SWARM_REPO_DIR`, `SWARM_MAIN_DIR`, `SWARM_LOGS_DIR`, `SWARM_OAUTH_TOKEN`, `SWARM_PROMPTS_DIR`.
 
-3. **Configure remote** (if repo URL provided and not already configured).
-   **Always use SSH URLs** (`git@github.com:user/repo.git`), never HTTPS — containers don't have GitHub credentials for HTTPS auth.
+3. **Configure remote** (if repo URL provided):
    ```bash
-   cd <repo-dir> && git remote add github git@github.com:<user>/<repo>.git
-   cat > <repo-dir>/hooks/post-receive << 'HOOK'
-   #!/bin/bash
-   unset GIT_DIR
-   REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-   cd "$REPO_DIR"
-   export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -i /home/swarm/.ssh/id_ed25519"
-   git push github --all -q 2>/dev/null || true
-   HOOK
-   chmod +x <repo-dir>/hooks/post-receive
+   bash swarm-setup.sh <output-dir> --configure-remote <github-url>
    ```
-   The post-receive hook runs inside containers, so mount the host SSH key into every container:
-   `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro`
-   This lets the hook push to GitHub with the host's credentials.
+   Automatically converts HTTPS to SSH, creates post-receive hook for auto-push. Mount the host SSH key into every container: `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro`
 
-4. **Read current state** — sync and scan:
+4. **Read current state** — on resume, read `harness-state.json` and sync git. Return stuck tasks:
    ```bash
-   cd <main-dir> && git pull origin main -q
-   ls tasks/pending/ tasks/active/ tasks/done/
+   bash swarm-setup.sh <output-dir> --unstick-tasks
    ```
-   On resume, also read `cat <output-dir>/harness-state.json`.
 
-5. **Return stuck tasks** (resume only): for any files in `tasks/active/`, check if their worker container is alive via `docker ps`. If dead, move the task back to pending (git mv, commit, push in a temp clone of repo.git).
+5. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
-6. **Run orchestrator** if needed (new run, or resume with new guidance from the user). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
+6. **Run a specialist sweep** after orchestration (new run or augment). Catches planning issues before workers start. Skip only on a simple resume with no orchestrator run.
 
-7. **Run a specialist sweep** after orchestration (new run or augment). Catches planning issues before workers start. Skip only on a simple resume with no orchestrator run. See Specialist Sweep below.
-
-8. **Set up shared build cache** (if the project has expensive builds). **Do this before spawning any workers:**
+7. **Set up shared build cache** (if the project has expensive builds). **Do this before spawning any workers:**
    ```bash
-   mkdir -p <output-dir>/build-cache
-   sudo chown 1001:1001 <output-dir>/build-cache || chmod 777 <output-dir>/build-cache
+   bash swarm-setup.sh <output-dir> --build-cache
    ```
    Mount `-v <output-dir>/build-cache:/build-cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` (e.g. `-e CCACHE_DIR=/build-cache`) and/or `EXTRA_GUIDANCE` to configure it for the project's build system. After the first worker completes a build, verify with `docker exec <container> ccache --show-stats`. **You cannot add mounts to running containers** — if you miss this step, you must stop and respawn workers.
 
-9. **Spawn workers** if pending > 0. If using build cache, spawn **one worker first**, wait for it to complete its first task (populates the cache), then spawn the rest.
+8. **Spawn workers** if pending > 0. If using build cache, spawn **one worker first**, wait for it to complete its first task (populates the cache), then spawn the rest.
 
-10. **Write or update `harness-state.json`** (see State File below).
+9. **Write or update `harness-state.json`** (see State File below).
 
-11. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.** The run cannot progress without the monitoring loop.
+10. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.** The run cannot progress without the monitoring loop.
 
 ---
 
