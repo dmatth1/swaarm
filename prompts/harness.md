@@ -34,6 +34,8 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    cat > <repo-dir>/hooks/post-receive << 'HOOK'
    #!/bin/bash
    unset GIT_DIR
+   REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+   cd "$REPO_DIR"
    export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -i /home/swarm/.ssh/id_ed25519"
    git push github --all -q 2>/dev/null || true
    HOOK
