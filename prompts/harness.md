@@ -27,7 +27,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    ```bash
    bash swarm-setup.sh <output-dir> --configure-remote <github-url>
    ```
-   Automatically converts HTTPS to SSH, creates post-receive hook for auto-push. Mount the host SSH key into every container: `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro`
+   Automatically converts HTTPS to SSH and starts a background mirror loop that pushes to GitHub every 30 seconds from the host. No container credential setup needed.
 
 4. **Read current state** — on resume, read `harness-state.json` and sync git. Return stuck tasks:
    ```bash
@@ -131,7 +131,6 @@ All containers use the `swarm-agent` image. Common flags for every container:
 Optional flags for any container:
 - `-e EXTRA_GUIDANCE="..."` — situational prompt injection
 - `-v <build-cache>:/build-cache` — shared build cache
-- `-v $HOME/.ssh/id_ed25519:/home/swarm/.ssh/id_ed25519:ro` — SSH key for GitHub push (required if using post-receive hook)
 
 | Role | Additional flags | Mode |
 |------|-----------------|------|

@@ -171,20 +171,17 @@ EOF
         (cd "$REPO_DIR" && git remote set-url github "$SSH_URL")
     fi
 
-    # Write post-receive hook
-    cat > "$REPO_DIR/hooks/post-receive" << 'HOOK'
-#!/bin/bash
-unset GIT_DIR
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$REPO_DIR"
-export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -i /home/swarm/.ssh/id_ed25519"
-git push github --all -q 2>/dev/null || true
-HOOK
-    chmod +x "$REPO_DIR/hooks/post-receive"
+    # Kill any existing mirror loop
+    pkill -f "swarm-mirror-$OUTPUT_DIR" 2>/dev/null || true
 
-    # Verify
-    (cd "$REPO_DIR" && git push github --all -q 2>&1) && echo "Remote configured and verified: $SSH_URL" >&2 \
-        || echo "Remote configured but push failed (check SSH key): $SSH_URL" >&2
+    # Start background mirror loop on the host (pushes every 30s)
+    bash -c "while true; do cd \"$REPO_DIR\" && git push github --all -q 2>/dev/null; sleep 30; done" &
+    MIRROR_PID=$!
+    echo "$MIRROR_PID" > "$OUTPUT_DIR/mirror.pid"
+
+    # Initial push
+    (cd "$REPO_DIR" && git push github --all -q 2>&1) && echo "Remote configured, mirror loop started (PID $MIRROR_PID): $SSH_URL" >&2 \
+        || echo "Remote configured but initial push failed (check SSH key): $SSH_URL" >&2
     ;;
 
 --build-cache)
