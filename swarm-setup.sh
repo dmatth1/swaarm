@@ -118,6 +118,13 @@ else
     exit 1
 fi
 
+# ── Ensure github.com is in known_hosts (prevents SSH prompts) ──
+
+if [[ ! -f "$HOME/.ssh/known_hosts" ]] || ! grep -q "github.com" "$HOME/.ssh/known_hosts" 2>/dev/null; then
+    mkdir -p "$HOME/.ssh"
+    ssh-keyscan github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null
+fi
+
 # ── Output config ─────────────────────────────────────────────
 
 cat <<EOF

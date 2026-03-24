@@ -27,11 +27,13 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    ```
    Capture the output — it contains `SWARM_OUTPUT_DIR`, `SWARM_REPO_DIR`, `SWARM_MAIN_DIR`, `SWARM_LOGS_DIR`, `SWARM_OAUTH_TOKEN`, `SWARM_PROMPTS_DIR`.
 
-3. **Configure remote** (if repo URL provided and not already configured):
+3. **Configure remote** (if repo URL provided and not already configured).
+   **Always use SSH URLs** (`git@github.com:user/repo.git`), never HTTPS — containers don't have GitHub credentials for HTTPS auth.
    ```bash
-   cd <repo-dir> && git remote add github <url>
+   cd <repo-dir> && git remote add github git@github.com:<user>/<repo>.git
    cat > <repo-dir>/hooks/post-receive << 'HOOK'
    #!/bin/bash
+   unset GIT_DIR
    export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no -i /home/swarm/.ssh/id_ed25519"
    git push github --all -q 2>/dev/null || true
    HOOK
