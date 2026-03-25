@@ -22,7 +22,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    ```bash
    bash swarm-setup.sh <output-dir> --remote <github-url>
    ```
-   `--remote` is optional. Always mount `-v <output-dir>/build-cache:/build-cache` into every container.
+   `--remote` is optional. Include `-v <output-dir>/build-cache:/build-cache` in every `docker run` command.
 
 3. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
