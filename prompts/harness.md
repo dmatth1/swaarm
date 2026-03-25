@@ -21,12 +21,12 @@ Auto-detects new vs resume. Creates workspace, build cache, Docker image, auth, 
 
 ## Flow
 
-### 1. Orchestrator (if new run or resume with new guidance)
+### 1. Orchestrator
 
 Run orchestrator container. Wait for completion. Verify tasks created.
 → Update state: `"phase": "orchestrating"` before, `"phase": "orchestration_complete"` after.
 
-### 2. Specialist Sweep (mandatory after orchestration)
+### 2. Specialist Sweep
 
 Run all specialists in parallel except ProjectManager. Wait. Run PM solo.
 → Update state: `"phase": "specialist_sweep"` before, record sweep in decisions.
