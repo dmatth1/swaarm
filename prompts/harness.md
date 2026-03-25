@@ -36,7 +36,17 @@ Run all specialists in parallel except ProjectManager. Wait. Run PM solo.
 Spawn one worker first (populates build cache). Wait for first task completion. Spawn the rest (up to user's maximum — scale to available parallelism).
 → Update state: `"phase": "workers_running"`, record worker count.
 
-### 4. Start Monitoring
+### 4. When pending = 0 and active = 0
+
+Loop back to Flow step 2 (Specialist Sweep). The flow continues naturally: sweep → spawn workers (if new tasks) → monitoring. If the sweep creates no new tasks:
+1. Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
+2. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
+3. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
+4. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
+
+**Never ask the user "should I continue?" — just do it.**
+
+### 5. Start Monitoring
 
 Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
@@ -62,13 +72,7 @@ Every cycle, do these steps in order:
    - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
-3. **When pending = 0 and active = 0** → **loop back to Flow step 2** (Specialist Sweep). The flow continues naturally: sweep → spawn workers (if new tasks) → monitoring. If the sweep creates no new tasks:
-   1. Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   2. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
-   3. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
-   4. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
-
-**Never ask the user "should I continue?" — just do it.**
+   - Pending = 0 and active = 0? → **go to Flow step 4.**
 
 ---
 
