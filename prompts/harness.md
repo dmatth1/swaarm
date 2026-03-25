@@ -67,11 +67,12 @@ Every cycle, do these steps in order:
    tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529' || true
    tail -30 <logs-dir>/orchestrator.log <logs-dir>/reviewer-*.log <logs-dir>/specialist-*.log 2>/dev/null | grep -iE 'TESTS_PASS|TESTS_FAIL|error|fatal|failed' || true
    ```
-2. **Check health and respond:**
+2. **Check health, respond, and make adaptive decisions** (see Adaptive Behavior below):
    - Mirror loop alive (if remote)? `cat <output-dir>/mirror.pid | xargs ps -p`. Restart if dead.
    - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
+   - Any issues in logs? Apply adaptive behavior — adjust worker count, switch models, use `EXTRA_GUIDANCE`, etc. Update state.
 3. **Pending = 0 and active = 0?** → **go to Flow step 2** (Specialist Sweep).
 
 ---
