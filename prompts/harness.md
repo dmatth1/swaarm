@@ -66,6 +66,11 @@ ls <main-dir>/tasks/active/ | grep -v .gitkeep | wc -l    # active
 ls <main-dir>/tasks/done/ | grep -v .gitkeep | wc -l      # done
 ```
 
+Also verify the GitHub mirror loop is alive (if remote configured):
+```bash
+cat <output-dir>/mirror.pid | xargs ps -p 2>/dev/null || bash swarm-setup.sh <output-dir> --configure-remote <repo-url>
+```
+
 ### Step 2: Check logs
 ```bash
 tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529' || true

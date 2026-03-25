@@ -171,11 +171,16 @@ EOF
         (cd "$REPO_DIR" && git remote set-url github "$SSH_URL")
     fi
 
-    # Kill any existing mirror loop
-    pkill -f "swarm-mirror-$OUTPUT_DIR" 2>/dev/null || true
+    # Kill any existing mirror loops for this output dir
+    if [[ -f "$OUTPUT_DIR/mirror.pid" ]]; then
+        kill "$(cat "$OUTPUT_DIR/mirror.pid")" 2>/dev/null || true
+    fi
+    # Also kill by pattern in case PID file is stale
+    pkill -f "swarm-mirror:$REPO_DIR" 2>/dev/null || true
 
     # Start background mirror loop on the host (pushes every 30s)
-    bash -c "while true; do cd \"$REPO_DIR\" && git push github --all -q 2>/dev/null; sleep 30; done" &
+    # The "swarm-mirror:<repo>" tag lets pkill find it reliably
+    bash -c "exec -a 'swarm-mirror:$REPO_DIR' bash -c 'while true; do cd \"$REPO_DIR\" && git push github --all -q 2>/dev/null; sleep 30; done'" &
     MIRROR_PID=$!
     echo "$MIRROR_PID" > "$OUTPUT_DIR/mirror.pid"
 
