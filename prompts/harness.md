@@ -18,11 +18,9 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    - Remote repo URL (optional, for GitHub mirroring)
    - Extra mounts (optional, e.g. reference docs)
 
-2. **Run setup** — one command does everything (workspace, build cache, auth, unstick tasks, remote + mirror loop):
+2. **Run setup** — one command, auto-detects new vs resume:
    ```bash
-   bash swarm-setup.sh <output-dir> --new --remote <github-url>
-   # or for resume:
-   bash swarm-setup.sh <output-dir> --resume --remote <github-url>
+   bash swarm-setup.sh <output-dir> --remote <github-url>
    ```
    `--remote` is optional. Always mount `-v <output-dir>/build-cache:/build-cache` into every container.
 
