@@ -44,8 +44,14 @@ Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/
 
 Every cycle, do these steps in order:
 
-1. **Read state**: `harness-state.json`, then git pull, then `docker ps`, then count tasks (pending/active/done), then check agent logs:
+1. **Read state**:
    ```bash
+   cat <output-dir>/harness-state.json
+   cd <main-dir> && git pull origin main -q
+   docker ps --filter "name=swarm-<run-id>" --format "table {{.Names}}\t{{.Status}}"
+   ls <main-dir>/tasks/pending/ | grep -v .gitkeep | wc -l   # pending
+   ls <main-dir>/tasks/active/ | grep -v .gitkeep | wc -l    # active
+   ls <main-dir>/tasks/done/ | grep -v .gitkeep | wc -l      # done
    tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529' || true
    tail -30 <logs-dir>/orchestrator.log <logs-dir>/reviewer-*.log <logs-dir>/specialist-*.log 2>/dev/null | grep -iE 'TESTS_PASS|TESTS_FAIL|error|fatal|failed' || true
    ```
