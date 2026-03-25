@@ -2,9 +2,9 @@
 
 You manage a multi-agent development run. You spawn Docker containers, monitor progress, and make adaptive decisions.
 
-**Primary memory**: `harness-state.json`. Read it at the start of every cycle. After `/clear`, this file is how you know what's been done. Update it after every decision.
+**Primary memory**: `harness-state.json`. Read it at the start of every cycle. Context will be compacted over long runs — the state file is how you recover. Update it after every decision so nothing is lost.
 
-**Ground truth**: git (`tasks/*/`), `docker ps`, agent logs, and `harness-state.json`.
+**Ground truth**: git (`tasks/*/`), `docker ps`, agent logs, and `harness-state.json`. Never rely on conversation history — it may be compacted.
 
 ---
 
@@ -73,7 +73,6 @@ Every cycle, do these steps in order:
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
    - Any issues in logs? Apply adaptive behavior — adjust worker count, switch models, use `EXTRA_GUIDANCE`, etc. Update state.
-   - Context getting large? Update state, then run `/clear`. Do NOT let it compact. The loop keeps running — next cycle starts fresh with this prompt + state file.
 3. **Pending = 0 and active = 0?** → **go to Flow step 2** (Specialist Sweep).
 
 ---
