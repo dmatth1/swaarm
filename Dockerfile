@@ -9,9 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     golang-go \
     build-essential \
+    cmake \
     curl \
     sudo \
     ccache \
+    xvfb \
+    xauth \
     && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI
