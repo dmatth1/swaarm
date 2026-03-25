@@ -4,7 +4,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 **Ground truth** is always git (`tasks/pending/`, `tasks/active/`, `tasks/done/`), `docker ps`, and `harness-state.json`. Never rely on conversation history — re-read these sources every monitoring cycle.
 
-**Context management**: prefer `/clear` over compaction. After several hours, compaction degrades context and causes skipped steps. When context gets large, `/clear` and restart the `/loop`. The harness prompt (this file) is auto-loaded by Claude Code, and `harness-state.json` has everything needed to resume — phase, reviewed tasks, decisions, all user prompts. A fresh context with the state file is more reliable than a compacted one.
+**Context management**: prefer `/clear` over compaction. After several hours, compaction degrades context and causes skipped steps. When context gets large, run `/clear`. The `/loop` keeps running — the next cycle fires with a fresh context, reads `harness-state.json`, and continues. This prompt is auto-loaded by Claude Code on every cycle.
 
 ---
 
