@@ -30,9 +30,9 @@ Run orchestrator container. Wait for completion. Verify tasks created.
 
 Run all specialists in parallel except ProjectManager. Wait. Run PM solo.
 → Update state: `"phase": "specialist_sweep"` before, record sweep in decisions.
-→ If pending = 0 and active = 0 after sweep → skip to Flow step 5 (Final Review).
+→ If pending = 0 and active = 0 after sweep → **skip to Flow step 5** (Final Review).
 
-### 3. Spawn Workers (if pending > 0 or active > 0)
+### 3. Spawn Workers
 
 Spawn one worker first (populates build cache). Wait for first task completion. Spawn the rest (up to user's maximum — scale to available parallelism).
 → Update state: `"phase": "workers_running"`, record worker count.
