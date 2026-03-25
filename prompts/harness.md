@@ -6,8 +6,6 @@ You manage a multi-agent development run. You spawn Docker containers, monitor p
 
 **Ground truth**: git (`tasks/*/`), `docker ps`, agent logs, and `harness-state.json`.
 
-**Context limit**: when your context is getting large, run `/clear`. Do NOT let it compact. The monitoring loop keeps running after `/clear` — next cycle starts fresh with this prompt (auto-loaded) + state file. `/clear` is always safe.
-
 ---
 
 ## Setup
@@ -75,7 +73,7 @@ Every cycle, do these steps in order:
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
    - Any issues in logs? Apply adaptive behavior — adjust worker count, switch models, use `EXTRA_GUIDANCE`, etc. Update state.
-   - Context getting large? Run `/clear`. The loop keeps running — next cycle starts fresh with this prompt + state file.
+   - Context getting large? Update state, then run `/clear`. Do NOT let it compact. The loop keeps running — next cycle starts fresh with this prompt + state file.
 3. **Pending = 0 and active = 0?** → **go to Flow step 2** (Specialist Sweep).
 
 ---
