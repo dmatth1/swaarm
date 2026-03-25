@@ -218,7 +218,7 @@ Do **not** duplicate SPEC.md content — CLAUDE.md is for orientation (what exis
 Create task files in `tasks/pending/`. Name them `NNN-descriptive-name.md`. Number them in dependency order. Use the task file format and rules from the **Task Creation Guide** appended below.
 
 **Mandatory — do not omit any of these:**
-- `001-project-setup.md` — create directory structure, init files, install dependencies. **Must include a `.gitignore`** that excludes build artifacts, generated files, and screenshots (e.g. `build/`, `*.o`, `*.pch`, `*.a`, `*.so`, `*.dylib`, `*.gch`, `node_modules/`, `__pycache__/`, `*.pyc`, `screenshots/`). Screenshots stay local to each container — agents verify the UI by building and running the app themselves. The harness verifies visual testing happened via agent logs.
+- `001-project-setup.md` — create directory structure, init files, install dependencies. **Must include a `.gitignore`** that excludes build artifacts, generated files, and screenshots (e.g. `build/`, `*.o`, `*.pch`, `*.a`, `*.so`, `*.dylib`, `*.gch`, `node_modules/`, `__pycache__/`, `*.pyc`, `screenshots/`).
 - `002-test-infrastructure.md` — set up the test framework (pytest/jest/go test/etc.), directory structure (`tests/`), shared fixtures, and any test helpers or factories. All subsequent tasks depend on this existing. Must depend on task 001.
 - `NNN-testing-and-verification.md` — **highest number**, runs the full test suite end-to-end and confirms everything works. This task is not optional. The build is not complete without it.
 

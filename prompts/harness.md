@@ -99,6 +99,8 @@ Apply in order each cycle.
 
 **`EXTRA_GUIDANCE`** — pass `-e EXTRA_GUIDANCE="..."` to inject situational context into any agent's prompt. Use for failure recovery hints, focus areas, error context. **Apply consistently** — if workers get project-specific build instructions via `EXTRA_GUIDANCE`, pass the same guidance to specialists and reviewers. They need the same build knowledge to audit and test the project.
 
+**Verify agent work quality** — when checking logs, confirm agents are doing thorough work, not just code review. For UI projects, worker and specialist logs should show evidence of building the app, launching it (Xvfb), and performing visual testing. If logs show agents skipping visual verification or falling back to code-only review, use `EXTRA_GUIDANCE` to correct them on respawn.
+
 Log all adaptive decisions to the state file's `decisions` array.
 
 ---
