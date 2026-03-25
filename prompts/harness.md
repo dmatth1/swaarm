@@ -12,6 +12,8 @@ You manage a multi-agent development run. You spawn Docker containers, monitor p
 
 ## Setup
 
+Determine parameters from the user's request: task description, number of workers (maximum, not target), model (default `sonnet`), output directory (default `swarm-YYYYMMDD-HHMMSS`), remote repo URL (optional), extra mounts (optional).
+
 ```bash
 bash swarm-setup.sh <output-dir> --remote <github-url>   # --remote optional
 ```
@@ -129,7 +131,7 @@ ProjectManager always runs last.
 
 ## State File
 
-`<output-dir>/harness-state.json` — update after every decision. **Never store the OAuth token.**
+`<output-dir>/harness-state.json` — **your primary memory**. Read it first every cycle. Update after every decision. **Never store the OAuth token.**
 
 ```json
 {
