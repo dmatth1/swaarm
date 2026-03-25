@@ -50,12 +50,12 @@ Every cycle, do these steps in order:
 4. **Handle new completions**: decide whether to review (based on resource pressure, pass/fail history, task criticality). If reviewing and `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
 5. **Periodic specialist sweep**: every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
 6. **When pending = 0 and active = 0:**
-1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
-2. Sync git. If specialists created new tasks → spawn workers, update state: `"phase": "workers_running"`. **Loop back to monitoring.**
-3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-4. If `TESTS_FAIL` → run orchestrator to add fix tasks, spawn workers, update state: `"phase": "workers_running"`. **Loop back to monitoring.**
-5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps, spawn workers. **Loop back to monitoring.**
-6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
+   1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
+   2. Sync git. If specialists created new tasks → spawn workers, update state: `"phase": "workers_running"`. **Loop back to step 1.**
+   3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
+   4. If `TESTS_FAIL` → run orchestrator to add fix tasks, spawn workers, update state: `"phase": "workers_running"`. **Loop back to step 1.**
+   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps, spawn workers. **Loop back to step 1.**
+   6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
 
