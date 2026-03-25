@@ -10,31 +10,33 @@ You manage a multi-agent development run. You spawn Docker containers, monitor p
 
 ---
 
-## Flow
-
-### 1. Setup
+## Setup
 
 ```bash
 bash swarm-setup.sh <output-dir> --remote <github-url>   # --remote optional
 ```
 Auto-detects new vs resume. Creates workspace, build cache, Docker image, auth, mirror loop. Update `harness-state.json` with run config, phase, tasks array.
 
-### 2. Orchestrator (if new run or resume with new guidance)
+---
+
+## Flow
+
+### 1. Orchestrator (if new run or resume with new guidance)
 
 Run orchestrator container. Wait for completion. Verify tasks created.
 → Update state: `"phase": "orchestrating"` before, `"phase": "orchestration_complete"` after.
 
-### 3. Specialist Sweep (mandatory after orchestration)
+### 2. Specialist Sweep (mandatory after orchestration)
 
-Run all specialists in parallel except ProjectManager. Wait. Run PM solo. Sync git.
+Run all specialists in parallel except ProjectManager. Wait. Run PM solo.
 → Update state: `"phase": "specialist_sweep"` before, record sweep in decisions.
 
-### 4. Spawn Workers
+### 3. Spawn Workers
 
 Spawn one worker first (populates build cache). Wait for first task completion. Spawn the rest (up to user's maximum — scale to available parallelism).
 → Update state: `"phase": "workers_running"`, record worker count.
 
-### 5. Start Monitoring
+### 4. Start Monitoring
 
 Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
@@ -62,10 +64,10 @@ Every cycle, do these steps in order:
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
 3. **When pending = 0 and active = 0:**
    1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
-   2. If specialists created new tasks → **loop back to Flow step 4** (Spawn Workers).
+   2. If specialists created new tasks → **loop back to Flow step 3** (Spawn Workers) (Spawn Workers).
    3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   4. If `TESTS_FAIL` → **loop back to Flow step 2** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
-   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 2** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
+   4. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
+   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
    6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
