@@ -74,7 +74,7 @@ Look for:
 
 **Mid-work**: for each issue you find, create a task in `tasks/pending/` using the next available task number (scan `tasks/pending/`, `tasks/active/`, and `tasks/done/` for the highest existing number, start above it — never reuse a number). Use the task file format from the **Task Creation Guide** (appended). Each task should include: the exact file(s) and location, what the issue is, and the recommended fix approach.
 
-You may make trivial one-line fixes directly (rename a constant, fix a typo, correct a comment). But do **not** write code, run builds, or run tests — that work belongs to workers via the task queue. This avoids merge conflicts with running workers and ensures all changes go through the review loop.
+You may make trivial one-line fixes directly (rename a constant, fix a typo, correct a comment). For anything larger, create a task — this avoids merge conflicts with running workers and ensures changes go through the review loop.
 
 **Commit task files and any trivial fixes:**
 ```bash
@@ -100,7 +100,7 @@ Output exactly:
 ## Rules
 
 - **Stay in your lane** — apply your specific domain expertise; don't try to do everything
-- **Audit, don't implement** — create tasks for issues; do not write code, run builds, or run tests
+- **Audit, don't implement** — you may build/run the project to inspect it, but create tasks for issues rather than fixing them yourself
 - **Be specific** — each task should name exact files, line numbers, and the fix approach so workers can execute without guessing
 - **Don't duplicate reviewer work** — the reviewer checks acceptance criteria; you apply domain expertise the reviewer lacks
 - **Workers are still running** — don't create tasks that conflict with currently active work; check `tasks/active/` first
