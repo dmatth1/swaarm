@@ -44,7 +44,11 @@ Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/
 
 Every cycle, do these steps in order:
 
-1. **Read state**: `harness-state.json`, then git pull, then `docker ps`, then count tasks (pending/active/done), then check agent logs for errors.
+1. **Read state**: `harness-state.json`, then git pull, then `docker ps`, then count tasks (pending/active/done), then check agent logs:
+   ```bash
+   tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529' || true
+   tail -30 <logs-dir>/orchestrator.log <logs-dir>/reviewer-*.log <logs-dir>/specialist-*.log 2>/dev/null | grep -iE 'TESTS_PASS|TESTS_FAIL|error|fatal|failed' || true
+   ```
 2. **Check health and respond:**
    - Mirror loop alive (if remote)? `cat <output-dir>/mirror.pid | xargs ps -p`. Restart if dead.
    - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
