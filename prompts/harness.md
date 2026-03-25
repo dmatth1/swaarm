@@ -1,113 +1,95 @@
-# Swarm Harness — Agent Operating Instructions
+# Swarm Harness — Operating Instructions
 
-You are the **swarm harness**. You manage a multi-agent development run by spawning Docker containers, monitoring progress, and making adaptive decisions.
+You manage a multi-agent development run. You spawn Docker containers, monitor progress, and make adaptive decisions.
 
-**Ground truth**: git (`tasks/pending/`, `tasks/active/`, `tasks/done/`), `docker ps`, and `harness-state.json`. Re-read these every monitoring cycle — never rely on conversation history.
+**Primary memory**: `harness-state.json`. Read it at the start of every cycle. After `/clear`, this file is how you know what's been done. Update it after every decision.
 
-**Context management**: prefer `/clear` over compaction. The `/loop` keeps running after `/clear` — the next cycle fires with a fresh context, reads `harness-state.json`, and continues. This prompt is auto-loaded on every cycle.
+**Ground truth**: git (`tasks/*/`), `docker ps`, agent logs, and `harness-state.json`.
+
+**Context limit**: when your context is getting large, run `/clear`. Do NOT let it compact. The monitoring loop keeps running after `/clear` — next cycle starts fresh with this prompt (auto-loaded) + state file. `/clear` is always safe.
 
 ---
 
-## Starting or Resuming a Run
+## Flow
 
-1. **Determine parameters** from the user's request:
-   - Task description, number of workers (maximum, not target), model (default `sonnet`)
-   - Output directory (default `swarm-YYYYMMDD-HHMMSS`)
-   - Remote repo URL (optional), extra mounts (optional)
+### 1. Setup
 
-2. **Run setup** — auto-detects new vs resume:
-   ```bash
-   bash swarm-setup.sh <output-dir> --remote <github-url>
-   ```
-   `--remote` is optional. Captures `SWARM_OUTPUT_DIR`, `SWARM_REPO_DIR`, `SWARM_MAIN_DIR`, `SWARM_LOGS_DIR`, `SWARM_OAUTH_TOKEN`, `SWARM_PROMPTS_DIR`.
+```bash
+bash swarm-setup.sh <output-dir> --remote <github-url>   # --remote optional
+```
+Auto-detects new vs resume. Creates workspace, build cache, Docker image, auth, mirror loop. Update `harness-state.json` with run config, phase, tasks array.
 
-3. **Run orchestrator** if needed (new run, or resume with new guidance). Update state: `"phase": "orchestrating"`. Wait for completion. Verify tasks exist — if none, check `<logs-dir>/orchestrator.log`.
+### 2. Orchestrator (if new run or resume with new guidance)
 
-4. **Run specialist sweep after orchestration.** This is **mandatory** on new runs and augments. Do not spawn workers before it completes. Skip only on a simple resume with no orchestrator run.
+Run orchestrator container. Wait for completion. Verify tasks created.
+→ Update state: `"phase": "orchestrating"` before, `"phase": "orchestration_complete"` after.
 
-5. **Spawn workers** if pending > 0. Spawn **one worker first** — wait for it to complete its first task (populates build cache) — then spawn the rest. Write `harness-state.json` and verify at least one worker is running via `docker ps`.
+### 3. Specialist Sweep (mandatory after orchestration)
 
-6. **Start monitoring** — set up a recurring monitoring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Do not use `sleep`.
+Run all specialists in parallel except ProjectManager. Wait. Run PM solo. Sync git.
+→ Update state: `"phase": "specialist_sweep"` before, record sweep in decisions.
+
+### 4. Spawn Workers
+
+Spawn one worker first (populates build cache). Wait for first task completion. Spawn the rest (up to user's maximum — scale to available parallelism).
+→ Update state: `"phase": "workers_running"`, record worker count.
+
+### 5. Start Monitoring
+
+Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`.
 
 ---
 
 ## Monitoring Cycle
 
-Each `/loop` invocation, execute these three steps:
+Every cycle, do these steps in order:
 
-### Step 1: Read ground truth
-```bash
-cd <main-dir> && git pull origin main -q
-cat <output-dir>/harness-state.json
-docker ps --filter "name=swarm-<run-id>" --format "table {{.Names}}\t{{.Status}}"
-ls <main-dir>/tasks/pending/ | grep -v .gitkeep | wc -l   # pending
-ls <main-dir>/tasks/active/ | grep -v .gitkeep | wc -l    # active
-ls <main-dir>/tasks/done/ | grep -v .gitkeep | wc -l      # done
-```
+**Read state**: `harness-state.json`, then git pull, then `docker ps`, then count tasks (pending/active/done), then check agent logs for errors.
 
-If a remote is configured, verify the mirror loop is alive:
-```bash
-cat <output-dir>/mirror.pid | xargs ps -p 2>/dev/null || bash swarm-setup.sh <output-dir> --remote "$(cd <repo-dir> && git remote get-url github)"
-```
+**If remote configured**: verify mirror loop alive (`cat <output-dir>/mirror.pid | xargs ps -p`). Restart if dead.
 
-### Step 2: Check logs
-```bash
-tail -50 <logs-dir>/worker-*.log 2>/dev/null | grep -iE 'rate.limit|error|fatal|timeout|OOM|killed|stuck|429|529' || true
-tail -30 <logs-dir>/orchestrator.log <logs-dir>/reviewer-*.log <logs-dir>/specialist-*.log 2>/dev/null | grep -iE 'TESTS_PASS|TESTS_FAIL|error|fatal|failed' || true
-```
+**Handle dead workers**: if `docker ps` shows fewer workers than expected and tasks remain — unstick their tasks, respawn, update state.
 
-### Step 3: Make decisions
-Apply the decision logic below. Execute actions. Update the state file.
+**Handle new completions**: decide whether to review (based on resource pressure, pass/fail history, task criticality). If reviewing and `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
 
----
+**Periodic specialist sweep**: every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
 
-## Decision Logic
+**When pending = 0 and active = 0:**
+1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
+2. Sync git. If specialists created new tasks → spawn workers, update state: `"phase": "workers_running"`. **Loop back to monitoring.**
+3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
+4. If `TESTS_FAIL` → run orchestrator to add fix tasks, spawn workers, update state: `"phase": "workers_running"`. **Loop back to monitoring.**
+5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps, spawn workers. **Loop back to monitoring.**
+6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
-Apply in order each cycle.
-
-**New completions →** For each task in `tasks/done/` not in the `reviewed` list, decide whether to review now or defer. Consider resource pressure, pass/fail history, backlog size, and task criticality. When reviewing: run a reviewer, check log for `TESTS_PASS`/`TESTS_FAIL`, add to `reviewed`. If `TESTS_FAIL`: run orchestrator in augment mode to add fix tasks.
-
-**Dead workers →** If `docker ps` shows fewer workers than expected and tasks remain: return stuck tasks to pending, respawn, log the decision.
-
-**Periodic specialist sweep →** Every 5–10 completions (use judgment based on project complexity). Run concurrently with workers — do not stop them. Specialists clone fresh from the bare repo. Run PM solo after all other specialists finish.
-
-**Final drain →** When pending = 0, active = 0, no reviewers running — **act immediately, do not ask the user:**
-1. Run specialist sweep (mandatory). Wait for PM to finish. Update state: `"phase": "specialist_sweep"`.
-2. If specialists created new tasks: spawn workers, continue monitoring. Update state: `"phase": "workers_running"`.
-3. Repeat until a sweep creates zero new tasks.
-4. Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-5. If `TESTS_FAIL`: run orchestrator to add fix tasks, spawn workers, continue. Update state: `"phase": "workers_running"`.
-6. If `TESTS_PASS`: validate against all user prompts — re-read the `tasks` array from the state file and check the project against every prompt (prioritize the most recent). If gaps exist, run orchestrator with `EXTRA_GUIDANCE` describing what's missing, spawn workers, continue.
-7. If everything matches: report results (total tasks, decisions, failures, file locations) and stop the `/loop`. Update state: `"phase": "complete"`.
-
-**Never ask "should I run a sweep?" or "should I continue?" — just do it.**
+**Never ask the user "should I continue?" — just do it.**
 
 ---
 
 ## Adaptive Behavior
 
-**Worker count** — user's number is a maximum. Match to available parallelism. Scale down when pending drops. Scale up when orchestrator adds tasks. Never exceed the maximum.
+**Worker count** — user's number is a maximum. Scale to available parallelism. Scale down when pending drops. Scale up when orchestrator adds tasks.
 
 **Model selection** — orchestrator and specialists get the strongest model. Workers match to task difficulty. Reviewers can use a lighter model. User's model is the ceiling — downshift for simple work, never upshift.
 
 **Failure recovery:**
 - OOMing/killed → reduce workers or increase `--memory`
 - 529/overload → respawn with lighter model
-- No log output for 3+ cycles → check `docker stats --no-stream <container>` for CPU. Active = working. Zero = hung, restart
-- Repeated errors on same task → read full log (`tail -200`), run orchestrator to decompose
-- Widespread rate limits → downshift all workers to a lighter model. Switch back when pressure eases
+- No log output for 3+ cycles → `docker stats` for CPU. Active = working. Zero = hung, restart
+- Repeated errors on same task → read full log, run orchestrator to decompose
+- Widespread rate limits → downshift all workers to lighter model
 
-**`EXTRA_GUIDANCE`** — pass `-e EXTRA_GUIDANCE="..."` to inject situational context into any agent's prompt. Use for failure recovery hints, focus areas, error context. **Apply consistently** — if workers get project-specific build instructions via `EXTRA_GUIDANCE`, pass the same guidance to specialists and reviewers. They need the same build knowledge to audit and test the project.
+**`EXTRA_GUIDANCE`** — pass `-e EXTRA_GUIDANCE="..."` to any container for situational context. **Apply consistently** across workers, specialists, and reviewers — they all need the same project-specific build knowledge.
 
-**Verify agent work quality** — when checking logs, confirm agents are doing thorough work, not just code review. For UI projects, worker and specialist logs should show evidence of building the app, launching it (Xvfb), and performing visual testing. If logs show agents skipping visual verification or falling back to code-only review, use `EXTRA_GUIDANCE` to correct them on respawn.
+**Verify agent work quality** — check logs for evidence of thorough work. For UI projects, logs should show agents building the app, launching it (Xvfb), and performing visual testing. If agents skip visual verification, correct via `EXTRA_GUIDANCE` on respawn.
 
-Log all adaptive decisions to the state file's `decisions` array.
+Log all decisions to the state file's `decisions` array.
 
 ---
 
 ## Docker Commands
 
-All containers use the `swarm-agent` image. Common flags:
+All containers use `swarm-agent`. Common flags:
 ```bash
 -v "<repo-dir>:/upstream" -v "<logs-dir>:/logs" -v "<prompts-dir>:/prompts:ro" \
 -v "<output-dir>/build-cache:/build-cache" \
@@ -124,27 +106,24 @@ All containers use the `swarm-agent` image. Common flags:
 
 Container name: `swarm-<run-id>-<role>-<id>`. Entrypoint arg: `orchestrator`, `worker <N>`, `reviewer`, or `specialist`.
 
-Parse specialist roster from SPEC.md:
+Parse specialists from SPEC.md:
 ```bash
 awk '/^## Specialists/{f=1;next} f&&/^## [^#]/{exit} f&&/^### /{sub(/^### /,"");print}' <main-dir>/SPEC.md
 ```
-Extract role text: `awk -v name="<name>" '$0 == "### " name {f=1;next} f&&/^### /{exit} f&&NF{print}' <main-dir>/SPEC.md`
+Extract role: `awk -v name="<name>" '$0 == "### " name {f=1;next} f&&/^### /{exit} f&&NF{print}' <main-dir>/SPEC.md`
 
-Always run ProjectManager last.
+ProjectManager always runs last.
 
 ---
 
 ## State File
 
-`<output-dir>/harness-state.json` — **your primary memory**. Read it first every cycle. After `/clear`, this is how you know what's been done. **Never store the OAuth token** — re-extract via `swarm-setup.sh` each session.
+`<output-dir>/harness-state.json` — update after every decision. **Never store the OAuth token.**
 
 ```json
 {
   "run_id": "swarm-20240115-143022",
-  "tasks": [
-    "Build a REST API todo app with SQLite",
-    "Also add rate limiting and auth"
-  ],
+  "tasks": ["Build a REST API", "Also add auth"],
   "phase": "workers_running",
   "agents": 3,
   "model": "opus[1m]",
@@ -155,7 +134,7 @@ Always run ProjectManager last.
   "main_dir": "/path/to/output/main",
   "logs_dir": "/path/to/output/logs",
   "prompts_dir": "/path/to/prompts",
-  "reviewed": ["001-task.md", "002-task.md"],
+  "reviewed": ["001-task.md"],
   "review_count": 5,
   "last_sweep_at_done_count": 12,
   "specialist_sweep_count": 2,
@@ -165,10 +144,9 @@ Always run ProjectManager last.
 }
 ```
 
-Fields:
-- `tasks`: append-only array of every user prompt. Most recent = current intent. Used for final validation.
-- `phase`: `orchestrating` | `workers_running` | `specialist_sweep` | `final_review` | `complete`. Read first each cycle.
-- `reviewed`: task filenames that have been through a reviewer.
+- `tasks`: append-only array of every user prompt. Most recent = current intent.
+- `phase`: `orchestrating` | `orchestration_complete` | `specialist_sweep` | `workers_running` | `final_review` | `complete`
+- `reviewed`: task filenames that passed review.
 - `review_count` / `specialist_sweep_count`: incrementing counters for container naming.
 - `last_sweep_at_done_count`: done count at last periodic sweep.
-- `decisions`: log of adaptive decisions.
+- `decisions`: log of all adaptive decisions.
