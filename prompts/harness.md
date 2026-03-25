@@ -72,7 +72,7 @@ Every cycle, do these steps in order:
    - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
-   - Pending = 0 and active = 0? → **go to Flow step 2** (Specialist Sweep).
+3. **Pending = 0 and active = 0?** → **go to Flow step 2** (Specialist Sweep).
 
 ---
 
