@@ -45,11 +45,12 @@ Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/
 Every cycle, do these steps in order:
 
 1. **Read state**: `harness-state.json`, then git pull, then `docker ps`, then count tasks (pending/active/done), then check agent logs for errors.
-2. **Verify mirror loop** (if remote configured): `cat <output-dir>/mirror.pid | xargs ps -p`. Restart if dead.
-3. **Handle dead workers**: if `docker ps` shows fewer workers than expected and tasks remain — unstick their tasks, respawn, update state.
-4. **Handle new completions**: decide whether to review (based on resource pressure, pass/fail history, task criticality). If reviewing and `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
-5. **Periodic specialist sweep**: every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
-6. **When pending = 0 and active = 0:**
+2. **Check health and respond:**
+   - Mirror loop alive (if remote)? `cat <output-dir>/mirror.pid | xargs ps -p`. Restart if dead.
+   - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
+   - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
+   - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
+3. **When pending = 0 and active = 0:**
    1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
    2. Sync git. If specialists created new tasks → spawn workers, update state: `"phase": "workers_running"`. **Loop back to Monitoring Cycle step 1.**
    3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
