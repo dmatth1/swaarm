@@ -18,23 +18,21 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    - Remote repo URL (optional, for GitHub mirroring)
    - Extra mounts (optional, e.g. reference docs)
 
-2. **Run setup** (creates workspace, build cache, extracts auth):
+2. **Run setup** — one command does everything (workspace, build cache, auth, unstick tasks, remote + mirror loop):
    ```bash
-   bash swarm-setup.sh <output-dir> --new     # or --resume
-   bash swarm-setup.sh <output-dir> --unstick-tasks              # resume only: return stuck active tasks to pending
-   bash swarm-setup.sh <output-dir> --configure-remote <url>     # if GitHub mirroring needed
+   bash swarm-setup.sh <output-dir> --new --remote <github-url>
+   # or for resume:
+   bash swarm-setup.sh <output-dir> --resume --remote <github-url>
    ```
-   Setup always creates the build cache directory. Always mount `-v <output-dir>/build-cache:/build-cache` into every container.
+   `--remote` is optional. Always mount `-v <output-dir>/build-cache:/build-cache` into every container.
 
 3. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
 4. **MANDATORY: Run a specialist sweep after orchestration** (new run or augment). **Do not skip this step. Do not spawn workers before this completes.** The only exception is a simple resume with no orchestrator run.
 
-5. **Spawn workers** if pending > 0. Always spawn **one worker first**, wait for it to complete its first task (populates build cache), then spawn the rest.
+5. **Spawn workers** if pending > 0. Always spawn **one worker first**, wait for it to complete its first task (populates build cache), then spawn the rest. Write or update `harness-state.json` (see State File below).
 
-6. **Write or update `harness-state.json`** (see State File below).
-
-7. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.**
+6. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.**
 
 ---
 
