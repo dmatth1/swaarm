@@ -64,10 +64,10 @@ Every cycle, do these steps in order:
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
 3. **When pending = 0 and active = 0:**
    1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
-   2. If specialists created new tasks → **loop back to Flow step 3** (Spawn Workers) (Spawn Workers).
+   2. If specialists created new tasks → **loop back to Flow step 3** (Spawn Workers).
    3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   4. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
-   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
+   4. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
+   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
    6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
