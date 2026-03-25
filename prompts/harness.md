@@ -64,7 +64,7 @@ Every cycle, do these steps in order:
    1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
    2. If specialists created new tasks → **loop back to Flow step 4** (Spawn Workers).
    3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   4. If `TESTS_FAIL` → **loop back to Flow step 3** (Specialist Sweep), then Flow step 2 (Orchestrator) to add fix tasks.
+   4. If `TESTS_FAIL` → **loop back to Flow step 2** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
    5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps. **Loop back to Flow step 4** (Spawn Workers).
    6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
