@@ -27,7 +27,7 @@ You are the **swarm harness**. You manage a multi-agent development run by spawn
 
 5. **Spawn workers** if pending > 0. Spawn **one worker first** — wait for it to complete its first task (populates build cache) — then spawn the rest. Write `harness-state.json` and verify at least one worker is running via `docker ps`.
 
-6. **Start monitoring** — invoke `/loop 5m`. Use `/loop` (ralph loop), not `sleep`.
+6. **Start monitoring** — set up a recurring monitoring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Do not use `sleep`.
 
 ---
 
