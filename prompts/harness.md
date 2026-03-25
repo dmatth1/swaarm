@@ -97,7 +97,7 @@ Apply in order each cycle.
 - Repeated errors on same task → read full log (`tail -200`), run orchestrator to decompose
 - Widespread rate limits → downshift all workers to a lighter model. Switch back when pressure eases
 
-**`EXTRA_GUIDANCE`** — pass `-e EXTRA_GUIDANCE="..."` to inject situational context into any agent's prompt. Use for failure recovery hints, focus areas, error context.
+**`EXTRA_GUIDANCE`** — pass `-e EXTRA_GUIDANCE="..."` to inject situational context into any agent's prompt. Use for failure recovery hints, focus areas, error context. **Apply consistently** — if workers get project-specific build instructions via `EXTRA_GUIDANCE`, pass the same guidance to specialists and reviewers. They need the same build knowledge to audit and test the project.
 
 Log all adaptive decisions to the state file's `decisions` array.
 
