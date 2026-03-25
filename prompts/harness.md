@@ -36,7 +36,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 
 5. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
-6. **Run a specialist sweep** after orchestration (new run or augment). Catches planning issues before workers start. Skip only on a simple resume with no orchestrator run.
+6. **MANDATORY: Run a specialist sweep after orchestration** (new run or augment). **Do not skip this step. Do not spawn workers before this completes.** This catches planning issues before workers start building on a flawed plan. The only exception is a simple resume with no orchestrator run.
 
 7. **Set up shared build cache** (if the project has expensive builds). **Do this before spawning any workers:**
    ```bash
