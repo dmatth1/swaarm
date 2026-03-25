@@ -62,13 +62,11 @@ Every cycle, do these steps in order:
    - Dead workers? If `docker ps` shows fewer than expected and tasks remain — unstick tasks, respawn, update state.
    - New completions? Decide whether to review (resource pressure, pass/fail history, task criticality). If `TESTS_FAIL` → run orchestrator to add fix tasks, update state.
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
-3. **When pending = 0 and active = 0:**
-   1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
-   2. If specialists created new tasks → **loop back to Flow step 3** (Spawn Workers).
-   3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   4. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
-   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
-   6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
+3. **When pending = 0 and active = 0** → **loop back to Flow step 2** (Specialist Sweep). The flow continues naturally: sweep → spawn workers (if new tasks) → monitoring. If the sweep creates no new tasks:
+   1. Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
+   2. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
+   3. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
+   4. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
 
