@@ -36,7 +36,7 @@ Spawn one worker first (populates build cache). Wait for first task completion. 
 
 ### 5. Start Monitoring
 
-Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
+Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
 ---
 
@@ -62,10 +62,10 @@ Every cycle, do these steps in order:
    - Due for specialist sweep? Every 5–10 completions (use judgment). Run concurrently with workers. PM runs last. Update state.
 3. **When pending = 0 and active = 0:**
    1. Run specialist sweep. Update state: `"phase": "specialist_sweep"`.
-   2. Sync git. If specialists created new tasks → spawn workers, update state: `"phase": "workers_running"`. **Loop back to Monitoring Cycle step 1.**
+   2. Sync git. If specialists created new tasks → **loop back to Flow step 4** (Spawn Workers).
    3. If no new tasks → run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
-   4. If `TESTS_FAIL` → run orchestrator to add fix tasks, spawn workers, update state: `"phase": "workers_running"`. **Loop back to Monitoring Cycle step 1.**
-   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps, spawn workers. **Loop back to Monitoring Cycle step 1.**
+   4. If `TESTS_FAIL` → **loop back to Flow step 3** (Specialist Sweep), then Flow step 2 (Orchestrator) to add fix tasks.
+   5. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → run orchestrator with `EXTRA_GUIDANCE` describing gaps. **Loop back to Flow step 4** (Spawn Workers).
    6. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
