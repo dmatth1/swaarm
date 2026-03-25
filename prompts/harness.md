@@ -35,8 +35,6 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 6. **Pre-flight check — verify before monitoring:**
    - [ ] `harness-state.json` written with phase, tasks array, run config?
    - [ ] Specialist sweep ran after orchestration (unless simple resume)?
-   - [ ] Build cache mounted (`-v <output-dir>/build-cache:/build-cache`) on all containers?
-   - [ ] Mirror loop alive (if remote configured)? Check `cat <output-dir>/mirror.pid | xargs ps -p`
    - [ ] At least one worker running? Check `docker ps`
 
    Then **start monitoring** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`.
