@@ -22,7 +22,7 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    ```bash
    bash swarm-setup.sh <output-dir> --remote <github-url>
    ```
-   `--remote` is optional. Include `-v <output-dir>/build-cache:/build-cache` in every `docker run` command.
+   `--remote` is optional.
 
 3. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
@@ -33,7 +33,6 @@ You are operating as the **swarm harness**. You manage a multi-agent development
 6. **Pre-flight check — verify before monitoring:**
    - [ ] `harness-state.json` written with phase, tasks array, run config?
    - [ ] Specialist sweep ran after orchestration (unless simple resume)?
-   - [ ] Build cache mounted (`-v <output-dir>/build-cache:/build-cache`) on all containers?
    - [ ] At least one worker running? Check `docker ps`
 
    Then **start monitoring** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`.
@@ -117,13 +116,13 @@ Use your judgment, informed by logs from Step 2.
 All containers use the `swarm-agent` image. Common flags for every container:
 ```bash
 -v "<repo-dir>:/upstream" -v "<logs-dir>:/logs" -v "<prompts-dir>:/prompts:ro" \
+-v "<output-dir>/build-cache:/build-cache" \
 <extra-mount-flags> -e CLAUDE_CODE_OAUTH_TOKEN="<oauth-token>" -e VERBOSE=false \
 -e MODEL="<model>" -e PUBLIC_REPO=true
 ```
 
 Optional flags for any container:
 - `-e EXTRA_GUIDANCE="..."` — situational prompt injection
-- `-v <build-cache>:/build-cache` — shared build cache
 
 | Role | Additional flags | Mode |
 |------|-----------------|------|
