@@ -36,7 +36,7 @@ Spawn one worker first (populates build cache). Wait for first task completion. 
 
 ### 5. Start Monitoring
 
-Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`.
+Set up recurring cycle every 5 minutes using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
 ---
 
