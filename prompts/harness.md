@@ -18,37 +18,23 @@ You are operating as the **swarm harness**. You manage a multi-agent development
    - Remote repo URL (optional, for GitHub mirroring)
    - Extra mounts (optional, e.g. reference docs)
 
-2. **Run setup** (captures output dir, repo dir, logs dir, OAuth token, prompts dir):
+2. **Run setup** (creates workspace, build cache, extracts auth):
    ```bash
    bash swarm-setup.sh <output-dir> --new     # or --resume
+   bash swarm-setup.sh <output-dir> --unstick-tasks              # resume only: return stuck active tasks to pending
+   bash swarm-setup.sh <output-dir> --configure-remote <url>     # if GitHub mirroring needed
    ```
+   Setup always creates the build cache directory. Always mount `-v <output-dir>/build-cache:/build-cache` into every container.
 
-3. **Configure remote** (if repo URL provided):
-   ```bash
-   bash swarm-setup.sh <output-dir> --configure-remote <github-url>
-   ```
-   Automatically converts HTTPS to SSH and starts a background mirror loop that pushes to GitHub every 30 seconds from the host. No container credential setup needed.
+3. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
 
-4. **Read current state** — on resume, read `harness-state.json` and sync git. Return stuck tasks:
-   ```bash
-   bash swarm-setup.sh <output-dir> --unstick-tasks
-   ```
+4. **MANDATORY: Run a specialist sweep after orchestration** (new run or augment). **Do not skip this step. Do not spawn workers before this completes.** The only exception is a simple resume with no orchestrator run.
 
-5. **Run orchestrator** if needed (new run, or resume with new guidance). Update state file: `"phase": "orchestrating"`. Wait for it to finish. Verify tasks created — if none, check `<logs-dir>/orchestrator.log`.
+5. **Spawn workers** if pending > 0. Always spawn **one worker first**, wait for it to complete its first task (populates build cache), then spawn the rest.
 
-6. **MANDATORY: Run a specialist sweep after orchestration** (new run or augment). **Do not skip this step. Do not spawn workers before this completes.** This catches planning issues before workers start building on a flawed plan. The only exception is a simple resume with no orchestrator run.
+6. **Write or update `harness-state.json`** (see State File below).
 
-7. **Set up shared build cache** (if the project has expensive builds). **Do this before spawning any workers:**
-   ```bash
-   bash swarm-setup.sh <output-dir> --build-cache
-   ```
-   Mount `-v <output-dir>/build-cache:/build-cache` into every worker and reviewer container. `ccache` is pre-installed in the Docker image. Use env vars on `docker run` (e.g. `-e CCACHE_DIR=/build-cache`) and/or `EXTRA_GUIDANCE` to configure it for the project's build system. After the first worker completes a build, verify with `docker exec <container> ccache --show-stats`. **You cannot add mounts to running containers** — if you miss this step, you must stop and respawn workers.
-
-8. **Spawn workers** if pending > 0. If using build cache, spawn **one worker first**, wait for it to complete its first task (populates the cache), then spawn the rest.
-
-9. **Write or update `harness-state.json`** (see State File below).
-
-10. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.** The run cannot progress without the monitoring loop.
+7. **Start monitoring immediately** — invoke `/loop 5m`. Use `/loop` (ralph loop), **not** `sleep`. **Do not forget this step.**
 
 ---
 

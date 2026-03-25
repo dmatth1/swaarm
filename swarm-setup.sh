@@ -121,6 +121,10 @@ PROGEOF
         git config user.name "Swarm"
     )
 
+    # Always create build cache
+    mkdir -p "$OUTPUT_DIR/build-cache"
+    sudo chown 1001:1001 "$OUTPUT_DIR/build-cache" 2>/dev/null || chmod 777 "$OUTPUT_DIR/build-cache"
+
     echo "Workspace initialized: $OUTPUT_DIR" >&2
 
     cat <<EOF
@@ -138,6 +142,10 @@ EOF
         echo "ERROR: Not a swarm output directory: $OUTPUT_DIR" >&2
         exit 1
     fi
+
+    # Always ensure build cache exists
+    mkdir -p "$OUTPUT_DIR/build-cache"
+    sudo chown 1001:1001 "$OUTPUT_DIR/build-cache" 2>/dev/null || chmod 777 "$OUTPUT_DIR/build-cache"
 
     echo "Resuming from: $OUTPUT_DIR" >&2
 
