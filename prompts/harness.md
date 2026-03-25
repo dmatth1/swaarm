@@ -41,7 +41,7 @@ Spawn one worker first (populates build cache). Wait for first task completion. 
 
 Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
-### 5. Final Review
+### 5. Final Review (only reachable from step 2 when sweep creates no new tasks)
 
 Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
 1. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
