@@ -131,13 +131,7 @@ ProjectManager always runs last.
 
 ## State File
 
-`<output-dir>/harness-state.json` — **your primary memory**. Read it first every cycle. Update after every decision. **Never store the OAuth token.**
-
-After every update, also commit a copy to the project repo so it survives EC2 termination:
-```bash
-cp <output-dir>/harness-state.json <main-dir>/harness-state.json
-cd <main-dir> && git add harness-state.json && git commit -m "harness: update state" -q && git push origin main -q
-```
+`<main-dir>/harness-state.json` — **your primary memory**. Lives in the project repo so it's pushed to GitHub automatically. Read it first every cycle. Update after every decision, then commit and push. **Never store the OAuth token.**
 
 ```json
 {
