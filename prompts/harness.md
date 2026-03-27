@@ -94,6 +94,8 @@ Every cycle, do these steps in order:
 
 **Verify agent work quality** — check logs for evidence of thorough work. For UI projects, logs should show agents building the app, launching it (Xvfb), and performing visual testing. If agents skip visual verification, correct via `EXTRA_GUIDANCE` on respawn.
 
+**Build optimization** — for projects with slow C++ builds (JUCE, Qt, etc.), pass these env vars on `docker run` to improve ccache hit rates: `-e CCACHE_SLOPPINESS="pch_defines,time_macros,include_file_mtime,include_file_ctime" -e CCACHE_MAXSIZE="5G"`. The `time_macros` setting is critical — without it, `__DATE__`/`__TIME__` cache-busts every build. Also consider telling workers via `EXTRA_GUIDANCE` to build only the Standalone target during development (skip VST3/AU) to halve compile time.
+
 Log all decisions to the state file's `decisions` array.
 
 ---
