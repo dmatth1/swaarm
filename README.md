@@ -37,7 +37,7 @@ You: "Run swarm for a todo REST API with 3 agents"
   • Orchestrator container → SPEC.md + task files
   • Specialist sweep → validates the plan
   • Worker containers (up to your max)
-  • Monitors via /loop every 5m — git + docker + logs
+  • Monitors via cron job every 5m — git + docker + logs
          │
          ▼
   Workers (parallel Claude sessions in Docker)
@@ -99,7 +99,7 @@ swarm-TIMESTAMP/
 
 ## Monitoring
 
-The harness monitors automatically via `/loop`. You can also check:
+The harness monitors automatically via a cron job. You can also check:
 
 ```bash
 docker ps --filter "name=swarm-"              # containers

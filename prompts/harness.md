@@ -56,13 +56,13 @@ Spawn one worker first (populates build cache). Wait for first task completion. 
 → Update state: `"phase": "workers_running"`, record worker count.
 
 ### 4. Start Monitoring
-Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
+Set up a cron job using `CronCreate` with `*/5 * * * *` (every 5 minutes). Do **not** use `/loop` — use `CronCreate`. Save the cron job ID in the state file so you can cancel it on completion. Each invocation executes the **Monitoring Cycle** steps below.
 
 ### 5. Final Review (only reachable from step 2 when sweep creates no new tasks)
 Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
 1. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
 2. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
-3. If everything matches → report results, stop the loop. Update state: `"phase": "complete"`.
+3. If everything matches → report results, cancel the cron job (`CronDelete` with the ID from state file), update state: `"phase": "complete"`.
 
 **Never ask the user "should I continue?" — just do it.**
 
@@ -163,6 +163,7 @@ ProjectManager always runs last.
   "main_dir": "/path/to/output/main",
   "logs_dir": "/path/to/output/logs",
   "prompts_dir": "/path/to/prompts",
+  "cron_id": "abc123",
   "reviewed": ["001-task.md"],
   "review_count": 5,
   "last_sweep_at_done_count": 12,
@@ -180,6 +181,7 @@ ProjectManager always runs last.
 
 - `tasks`: append-only array of every user prompt. Most recent = current intent.
 - `phase`: `orchestrating` | `orchestration_complete` | `specialist_sweep` | `workers_running` | `final_review` | `complete`
+- `cron_id`: the monitoring cron job ID. Use with `CronDelete` to cancel on completion.
 - `reviewed`: task filenames that passed review.
 - `review_count` / `specialist_sweep_count`: incrementing counters for container naming.
 - `last_sweep_at_done_count`: done count at last periodic sweep.

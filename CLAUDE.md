@@ -23,7 +23,7 @@ prompts/task-format.md   ← Shared task creation guide
 
 1. **Orchestrator** writes `SPEC.md`, creates `tasks/pending/NNN-name.md`, commits and pushes.
 2. **Workers** loop in Docker containers: pull → claim task → do work → complete → repeat. Stateless per invocation.
-3. **Harness** (Claude Code) monitors via `/loop 5m` — reads git + docker + logs, reviews completions, runs specialist sweeps, handles failures adaptively.
+3. **Harness** (Claude Code) monitors via cron job every 5m — reads git + docker + logs, reviews completions, runs specialist sweeps, handles failures adaptively.
 
 Task state machine: `pending/` → `active/` → `done/`. Git's atomic push is the distributed lock.
 
