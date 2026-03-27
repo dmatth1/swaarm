@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     sudo \
     ccache \
+    clang \
+    ninja-build \
     xvfb \
     xauth \
     && rm -rf /var/lib/apt/lists/*
