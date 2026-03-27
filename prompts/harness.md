@@ -19,30 +19,44 @@ Auto-detects new vs resume. Creates workspace, build cache, Docker image, auth, 
 
 ---
 
-## Flow
+## Flow (State Machine)
+
+This is a state machine. Read `phase` from `harness-state.json` to know which step you're in. Transitions are explicit — always update `phase` when moving between steps.
+
+```
+┌──────────────┐    ┌─────────────────┐    ┌───────────────┐    ┌────────────┐
+│ 1.Orchestrator│───▶│ 2.Specialist    │───▶│ 3.Spawn       │───▶│ 4.Monitor  │
+│              │    │   Sweep         │    │   Workers     │    │            │
+└──────────────┘    └────────┬────────┘    └───────────────┘    └─────┬──────┘
+       ▲                     │ no tasks                               │
+       │                     ▼                                        │ pending=0
+       │            ┌─────────────────┐                               │ active=0
+       │◀───────────│ 5.Final Review  │◀──────────────────────────────┘
+       │  fail/gaps └────────┬────────┘            (via step 2)
+       │                     │ pass
+       │                     ▼
+       │              ┌────────────┐
+       └              │  COMPLETE  │
+                      └────────────┘
+```
 
 ### 1. Orchestrator
-
 Run orchestrator container. Wait for completion. Verify tasks created.
 → Update state: `"phase": "orchestrating"` before, `"phase": "orchestration_complete"` after.
 
 ### 2. Specialist Sweep
-
 Run all specialists in parallel except ProjectManager. Wait. Run PM solo.
 → Update state: `"phase": "specialist_sweep"` before, record sweep in decisions.
 → If pending = 0 and active = 0 after sweep → **skip to Flow step 5** (Final Review).
 
 ### 3. Spawn Workers
-
 Spawn one worker first (populates build cache). Wait for first task completion. Spawn the rest (up to user's maximum — scale to available parallelism).
 → Update state: `"phase": "workers_running"`, record worker count.
 
 ### 4. Start Monitoring
-
 Set up recurring cycle every 5 minutes (if not already running) using `/loop 5m` or `CronCreate` with `*/5 * * * *`. Each invocation executes the **Monitoring Cycle** steps below.
 
 ### 5. Final Review (only reachable from step 2 when sweep creates no new tasks)
-
 Run final reviewer with `COMPLETED_TASK=--final--`. Update state: `"phase": "final_review"`.
 1. If `TESTS_FAIL` → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing the failures.
 2. If `TESTS_PASS` → validate against all user prompts (read `tasks` array from state file, prioritize most recent). If gaps → **loop back to Flow step 1** (Orchestrator) with `EXTRA_GUIDANCE` describing gaps.
@@ -167,6 +181,6 @@ ProjectManager always runs last.
 - `reviewed`: task filenames that passed review.
 - `review_count` / `specialist_sweep_count`: incrementing counters for container naming.
 - `last_sweep_at_done_count`: done count at last periodic sweep.
-- `learnings`: things discovered during the run that should persist across compactions and sessions. Append when you learn something — never remove.
+- `learnings`: things discovered during the run that persist across compactions and sessions. Add, update, or remove as the project evolves — some learnings become stale.
 - `extra_guidance`: the current `EXTRA_GUIDANCE` string to pass to all containers. Update as you learn what works. Read this every time you spawn a container — it's the accumulated build knowledge for this project.
 - `decisions`: log of all adaptive decisions.
