@@ -151,6 +151,11 @@ ProjectManager always runs last.
   "review_count": 5,
   "last_sweep_at_done_count": 12,
   "specialist_sweep_count": 2,
+  "learnings": [
+    "JUCE builds need CCACHE_SLOPPINESS=time_macros",
+    "Build only Standalone target during dev — VST3 doubles compile time"
+  ],
+  "extra_guidance": "Use clang and ninja for builds: cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++. Set CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime",
   "decisions": [
     {"at": "2026-03-18T02:00:00Z", "action": "reduced workers to 3", "reason": "OOM"}
   ]
@@ -162,4 +167,6 @@ ProjectManager always runs last.
 - `reviewed`: task filenames that passed review.
 - `review_count` / `specialist_sweep_count`: incrementing counters for container naming.
 - `last_sweep_at_done_count`: done count at last periodic sweep.
+- `learnings`: things discovered during the run that should persist across compactions and sessions. Append when you learn something — never remove.
+- `extra_guidance`: the current `EXTRA_GUIDANCE` string to pass to all containers. Update as you learn what works. Read this every time you spawn a container — it's the accumulated build knowledge for this project.
 - `decisions`: log of all adaptive decisions.
