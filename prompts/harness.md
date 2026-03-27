@@ -30,9 +30,9 @@ This is a state machine. Read `phase` from `harness-state.json` to know which st
 └──────────────┘    └────────┬────────┘    └───────────────┘    └─────┬──────┘
        ▲                     │ no tasks                               │
        │                     ▼                                        │ pending=0
-       │            ┌─────────────────┐                               │ active=0
-       │◀───────────│ 5.Final Review  │◀──────────────────────────────┘
-       │  fail/gaps └────────┬────────┘            (via step 2)
+       │            ┌─────────────────┐    pending=0 active=0         │ active=0
+       │◀───────────│ 5.Final Review  │◀──── 2.Specialist Sweep ◀─────┘
+       │  fail/gaps └────────┬────────┘      (new tasks? → step 3)
        │                     │ pass
        │                     ▼
        │              ┌────────────┐
