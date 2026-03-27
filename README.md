@@ -90,11 +90,11 @@ swarm-TIMESTAMP/
 │   │   ├── pending/         ← Waiting to be claimed
 │   │   ├── active/          ← In progress
 │   │   └── done/            ← Completed
+│   ├── harness-state.json   ← Harness decisions, phase, learnings
 │   └── [project files]
 ├── logs/                    ← All agent logs
 ├── build-cache/             ← Shared ccache across containers
-├── repo.git/                ← Bare git repo (coordination hub)
-└── harness-state.json       ← Harness decisions, phase, reviewed tasks
+└── repo.git/                ← Bare git repo (coordination hub)
 ```
 
 ## Monitoring

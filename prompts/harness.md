@@ -58,7 +58,7 @@ Every cycle, do these steps in order:
 
 1. **Read state**:
    ```bash
-   cat <output-dir>/harness-state.json
+   cat <main-dir>/harness-state.json
    cd <main-dir> && git pull origin main -q
    docker ps --filter "name=swarm-<run-id>" --format "table {{.Names}}\t{{.Status}}"
    ls <main-dir>/tasks/pending/ | grep -v .gitkeep | wc -l   # pending
