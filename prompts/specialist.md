@@ -70,9 +70,11 @@ Look for:
 
 ### Step 4: Create Tasks for Issues Found
 
-**Pre-flight**: edit SPEC.md and/or task files in `tasks/pending/`. Add missing tasks. Commit changes.
+**Create tasks in `tasks/needs-grooming/`** — not `tasks/pending/`. Use any descriptive filename (e.g. `fix-thread-safety-fft.md`). Do not number them — ProjectManager will deduplicate, number, and move them to `tasks/pending/` after the sweep.
 
-**Mid-work**: for each issue you find, create a task in `tasks/pending/` using the next available task number (scan `tasks/pending/`, `tasks/active/`, and `tasks/done/` for the highest existing number, start above it — never reuse a number). Use the task file format from the **Task Creation Guide** (appended). Each task should include: the exact file(s) and location, what the issue is, and the recommended fix approach.
+Use the task file format from the **Task Creation Guide** (appended). Each task should include: the exact file(s) and location, what the issue is, and the recommended fix approach.
+
+**Pre-flight**: you may also edit SPEC.md and existing task files in `tasks/pending/` directly.
 
 You may make trivial one-line fixes directly (rename a constant, fix a typo, correct a comment). For anything larger, create a task — this avoids merge conflicts with running workers and ensures changes go through the review loop.
 

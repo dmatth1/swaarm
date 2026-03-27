@@ -124,8 +124,8 @@ else
         git config user.email "swarm@local"
         git config user.name "Swarm"
 
-        mkdir -p tasks/pending tasks/active tasks/done
-        touch tasks/pending/.gitkeep tasks/active/.gitkeep tasks/done/.gitkeep
+        mkdir -p tasks/pending tasks/active tasks/done tasks/needs-grooming
+        touch tasks/pending/.gitkeep tasks/active/.gitkeep tasks/done/.gitkeep tasks/needs-grooming/.gitkeep
 
         cat > SPEC.md << 'SPECEOF'
 # Project Specification
